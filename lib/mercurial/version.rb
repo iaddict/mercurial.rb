@@ -1,0 +1,3 @@
+module Mercurial
+  VERSION = "0.0.1"
+end
