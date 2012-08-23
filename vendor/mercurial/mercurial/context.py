@@ -885,7 +885,8 @@ class workingctx(changectx):
         p = self._repo.dirstate.parents()
         if p[1] == nullid:
             p = p[:-1]
-        return [changectx(self._repo, x) for x in p]
+        self._parents = [changectx(self._repo, x) for x in p]
+        return self._parents
 
     def status(self, ignored=False, clean=False, unknown=False):
         """Explicit status query

@@ -9,7 +9,6 @@
 
 #include <Python.h>
 #include <ctype.h>
-#include <stddef.h>
 #include <string.h>
 
 #include "util.h"
@@ -73,7 +72,7 @@ static PyObject *parse_manifest(PyObject *self, PyObject *args)
 	for (start = cur = str, zero = NULL; cur < str + len; cur++) {
 		PyObject *file = NULL, *node = NULL;
 		PyObject *flags = NULL;
-		ptrdiff_t nlen;
+		int nlen;
 
 		if (!*cur) {
 			zero = cur;
@@ -95,7 +94,7 @@ static PyObject *parse_manifest(PyObject *self, PyObject *args)
 
 		nlen = cur - zero - 1;
 
-		node = unhexlify(zero + 1, nlen > 40 ? 40 : (int)nlen);
+		node = unhexlify(zero + 1, nlen > 40 ? 40 : nlen);
 		if (!node)
 			goto bail;
 
@@ -1085,10 +1084,8 @@ static PyObject *index_partialmatch(indexObject *self, PyObject *args)
 		return NULL;
 	}
 
-	if (nodelen > 40) {
-		PyErr_SetString(PyExc_ValueError, "key too long");
-		return NULL;
-	}
+	if (nodelen > 40)
+		nodelen = 40;
 
 	for (i = 0; i < nodelen; i++)
 		hexdigit(node, i);

@@ -279,10 +279,10 @@ Test annotate with whitespace options
   > EOF
   $ hg ci -Am "adda"
   adding a
-  $ sed 's/EOL$//g' > a <<EOF
+  $ cat > a <<EOF
   > a  a
   > 
-  >  EOL
+  >  
   > b  b
   > EOF
   $ hg ci -m "changea"

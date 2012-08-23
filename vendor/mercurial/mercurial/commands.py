@@ -1847,17 +1847,14 @@ def debugdiscovery(ui, repo, remoteurl="default", **opts):
         localrevs = opts.get('local_head')
         doit(localrevs, remoterevs)
 
-@command('debugfileset',
-    [('r', 'rev', '', _('apply the filespec on this revision'), _('REV'))],
-    _('[-r REV] FILESPEC'))
-def debugfileset(ui, repo, expr, **opts):
+@command('debugfileset', [], ('REVSPEC'))
+def debugfileset(ui, repo, expr):
     '''parse and apply a fileset specification'''
-    ctx = scmutil.revsingle(repo, opts.get('rev'), None)
     if ui.verbose:
         tree = fileset.parse(expr)[0]
         ui.note(tree, "\n")
 
-    for f in fileset.getfileset(ctx, expr):
+    for f in fileset.getfileset(repo[None], expr):
         ui.write("%s\n" % f)
 
 @command('debugfsinfo', [], _('[PATH]'))
@@ -4177,7 +4174,7 @@ def manifest(ui, repo, node=None, rev=None, **opts):
                     res.append(fn[plen:-slen])
         finally:
             lock.release()
-        for f in res:
+        for f in sorted(res):
             ui.write("%s\n" % f)
         return
 
@@ -5775,7 +5772,7 @@ def update(ui, repo, node=None, rev=None, clean=False, date=None, check=False):
     current named branch and move the current bookmark (see :hg:`help
     bookmarks`).
 
-    Update sets the working directory's parent revision to the specified
+    Update sets the working directory's parent revison to the specified
     changeset (see :hg:`help parents`).
 
     If the changeset is not a descendant or ancestor of the working

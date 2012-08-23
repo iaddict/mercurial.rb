@@ -107,11 +107,6 @@ def notset(mctx, x):
     s = set(getset(mctx, x))
     return [r for r in mctx.subset if r not in s]
 
-def minusset(mctx, x, y):
-    xl = getset(mctx, x)
-    yl = set(getset(mctx, y))
-    return [f for f in xl if f not in yl]
-
 def listset(mctx, a, b):
     raise error.ParseError(_("can't use a list in this context"))
 
@@ -256,11 +251,8 @@ def grep(mctx, x):
     """``grep(regex)``
     File contains the given regular expression.
     """
-    try:
-        # i18n: "grep" is a keyword
-        r = re.compile(getstring(x, _("grep requires a pattern")))
-    except re.error, e:
-        raise error.ParseError(_('invalid match pattern: %s') % e)
+    pat = getstring(x, _("grep requires a pattern"))
+    r = re.compile(pat)
     return [f for f in mctx.existing() if r.search(mctx.ctx[f].data())]
 
 _units = dict(k=2**10, K=2**10, kB=2**10, KB=2**10,
@@ -414,7 +406,6 @@ methods = {
     'symbol': stringset,
     'and': andset,
     'or': orset,
-    'minus': minusset,
     'list': listset,
     'group': getset,
     'not': notset,
@@ -433,14 +424,7 @@ class matchctx(object):
     def filter(self, files):
         return [f for f in files if f in self.subset]
     def existing(self):
-        if self._status is not None:
-            removed = set(self._status[3])
-            unknown = set(self._status[4] + self._status[5])
-        else:
-            removed = set()
-            unknown = set()
-        return (f for f in self.subset
-                if (f in self.ctx and f not in removed) or f in unknown)
+        return (f for f in self.subset if f in self.ctx)
     def narrow(self, files):
         return matchctx(self.ctx, self.filter(files), self._status)
 
@@ -454,26 +438,14 @@ def _intree(funcs, tree):
                 return True
     return False
 
-# filesets using matchctx.existing()
-_existingcallers = [
-    'binary',
-    'exec',
-    'grep',
-    'size',
-    'symlink',
-]
-
 def getfileset(ctx, expr):
     tree, pos = parse(expr)
     if (pos != len(expr)):
         raise error.ParseError(_("invalid token"), pos)
 
     # do we need status info?
-    if (_intree(['modified', 'added', 'removed', 'deleted',
-                 'unknown', 'ignored', 'clean'], tree) or
-        # Using matchctx.existing() on a workingctx requires us to check
-        # for deleted files.
-        (ctx.rev() is None and _intree(_existingcallers, tree))):
+    if _intree(['modified', 'added', 'removed', 'deleted',
+                'unknown', 'ignored', 'clean'], tree):
         unknown = _intree(['unknown'], tree)
         ignored = _intree(['ignored'], tree)
 
@@ -485,7 +457,7 @@ def getfileset(ctx, expr):
             subset.extend(c)
     else:
         status = None
-        subset = list(ctx.walk(ctx.match([])))
+        subset = ctx.walk(ctx.match([]))
 
     return getset(matchctx(ctx, subset, status), tree)
 

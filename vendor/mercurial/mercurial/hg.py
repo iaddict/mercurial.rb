@@ -398,7 +398,7 @@ def clone(ui, peeropts, source, dest=None, pull=False, rev=None,
 
             if update:
                 if update is not True:
-                    checkout = srcpeer.lookup(update)
+                    checkout = srcrepo.lookup(update)
                 for test in (checkout, 'default', 'tip'):
                     if test is None:
                         continue

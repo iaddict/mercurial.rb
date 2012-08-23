@@ -295,8 +295,6 @@ class templater(object):
         conf.read(mapfile)
 
         for key, val in conf[''].items():
-            if not val:
-                raise SyntaxError(_('%s: missing value') % conf.source('', key))
             if val[0] in "'\"":
                 try:
                     self.cache[key] = parsestring(val)
