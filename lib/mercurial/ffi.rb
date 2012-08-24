@@ -28,13 +28,19 @@ module Mercurial
       start unless hg_run
       args = args.reject &:empty?
       debug("hg #{args.join(' ')}")
-      hg_run.run(args).rubify
+      success, output = hg_run.run(args).rubify
+      error("  => #{output}") unless success
+      success, output
     end
     
     private
     
     attr_reader :mercurial, :hg_run
     
+    def error(msg)
+      Mercurial.configuration.logger.error(msg)
+    end
+
     def debug(msg)
       Mercurial.configuration.logger.debug(msg)
     end
