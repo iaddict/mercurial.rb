@@ -30,7 +30,7 @@ module Mercurial
       debug("hg #{args.join(' ')}")
       success, output = hg_run.run(args).rubify
       error("  => #{output}") unless success
-      success, output
+      [success, output]
     end
     
     private
