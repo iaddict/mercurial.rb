@@ -26,11 +26,16 @@ module Mercurial
     
     def run_command(args)
       start unless hg_run
+      debug("hg #{args.join(' ')}")
       hg_run.run(args).rubify
     end
     
     private
     
     attr_reader :mercurial, :hg_run
+    
+    def debug(msg)
+      Mercurial.configuration.logger.debug(msg)
+    end
   end
 end
