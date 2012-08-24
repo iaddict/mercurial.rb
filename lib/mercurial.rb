@@ -2,7 +2,13 @@ require 'mercurial/version'
 require 'mercurial/configuration'
 require 'mercurial/ffi'
 require 'mercurial/style'
+require 'mercurial/changed_file'
+require 'mercurial/file'
+require 'mercurial/directory'
+require 'mercurial/branch'
 require 'mercurial/commit'
+require 'mercurial/blame'
+require 'mercurial/blame_line'
 require 'mercurial/repository'
 
 module Mercurial

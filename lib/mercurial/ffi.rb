@@ -5,8 +5,8 @@ module Mercurial
     extend self
     
     def start
-      mercurial_path = File.expand_path('../../../vendor/mercurial/', __FILE__)
-      hg_run_path = File.expand_path('../../python_exts/', __FILE__)
+      mercurial_path = ::File.expand_path('../../../vendor/mercurial/', __FILE__)
+      hg_run_path = ::File.expand_path('../../python_exts/', __FILE__)
       
       RubyPython.start
       RubyPython.import('pkg_resources') rescue nil
@@ -26,6 +26,7 @@ module Mercurial
     
     def run_command(args)
       start unless hg_run
+      args = args.reject &:empty?
       debug("hg #{args.join(' ')}")
       hg_run.run(args).rubify
     end

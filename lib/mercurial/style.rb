@@ -6,11 +6,11 @@ module Mercurial
     CHANGESET_SEPARATOR = "|//|&&&|//|\n"
     
     def root_path
-      File.expand_path('../../styles', __FILE__)
+      ::File.expand_path('../../styles', __FILE__)
     end
     
     def changeset
-      File.join(root_path, 'changeset.style')
+      ::File.join(root_path, 'changeset.style')
     end
     
     def parse_changesets(repo, text)

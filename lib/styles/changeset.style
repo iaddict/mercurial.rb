@@ -1,5 +1,5 @@
 changeset = "{node}|/|>&&<|/|{author|person}|/|>&&<|/|{author|email}|/|>&&<|/|{date|rfc3339date}|/|>&&<|/|{desc}|/|>&&<|/|{file_mods}|/|>&&<|/|{file_adds}|/|>&&<|/|{file_dels}|/|>&&<|/|{file_copies}|/|>&&<|/|{branch}|/|>&&<|/|{tags}|/|>&&<|/|{parents}|//|&&&|//|\n"
-file_add  = "A {file_add};"
-file_mod  = "M {file_mod};"
-file_del  = "D {file_del};"
+file_add  = "A {file_add};\n"
+file_mod  = "M {file_mod};\n"
+file_del  = "D {file_del};\n"
 file_copy = "C {source}->{name};"
