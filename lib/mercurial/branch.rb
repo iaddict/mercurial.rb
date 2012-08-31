@@ -9,7 +9,7 @@ module Mercurial
       @repository = repository
       @name = opts[:name]
       @status = opts[:status]
-      @branch = opts[:commit_node]
+      @commit_node = opts[:commit_node]
     end
     
     def active?
