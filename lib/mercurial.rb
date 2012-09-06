@@ -1,6 +1,6 @@
 require 'mercurial/version'
 require 'mercurial/configuration'
-require 'mercurial/ffi'
+require 'mercurial/popen'
 require 'mercurial/style'
 require 'mercurial/changed_file'
 require 'mercurial/file'
@@ -29,7 +29,7 @@ module Mercurial
     #    conf.logger = Rails.logger
     #  end
     #
-    def configure      
+    def configure
       yield(configuration)
     end
   end

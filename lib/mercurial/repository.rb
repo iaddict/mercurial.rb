@@ -73,7 +73,7 @@ module Mercurial
       args += options.flatten
       args += ['--repository', path]
 
-      Mercurial::FFI.run_command(args)
+      Mercurial::Popen.run_command(args)
     end
   end
 end

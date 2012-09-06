@@ -16,6 +16,6 @@ Gem::Specification.new do |gem|
   gem.extensions    = ["ext/mercurial/extconf.rb"]
   gem.version       = Mercurial::VERSION
   
-  gem.add_dependency 'rubypython', '~> 0.6.2'
+  gem.add_dependency 'posix-spawn', '~> 0.3.6'
   gem.add_development_dependency 'rake', '~> 0.9.2'
 end
