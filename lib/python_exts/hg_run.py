@@ -2,6 +2,9 @@ import os
 import sys
 import StringIO
 
+os.environ['HGPLAIN'] = '1' # use more stable plain output
+os.environ['HGRCPATH'] = '' # ignore non-repo specific hgrc files
+
 libdir = '@LIBDIR@'
 
 if libdir != '@' 'LIBDIR' '@':
@@ -33,7 +36,4 @@ def run(command):
   fout.close()
   ferr.close()
   
-  if ferr_value == '':
-    return [True, fout_value]
-  else:
-    return [False, ferr_value]
+  return [fout_value, ferr_value]

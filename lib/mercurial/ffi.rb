@@ -31,6 +31,17 @@ module Mercurial
       success, output = hg_run.run(args).rubify
       error("  => #{output}") unless success
       [success, output]
+      
+      ret_values = hg_run.run(args).rubify
+      fout = ret_values[0]
+      ferr = ret_values[1]
+      
+      if ferr.empty?
+        [true, fout]
+      else
+        [false, ferr]
+      end
+      
     end
     
     private
