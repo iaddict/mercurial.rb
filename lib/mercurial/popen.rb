@@ -1,4 +1,5 @@
 require 'json'
+require 'base64'
 require 'timeout'
 require 'posix/spawn'
 
@@ -68,13 +69,13 @@ module Mercurial
     def run_command(args)
       args = args.reject &:empty?
       ret_values = hg_run(args)
-      fout = ret_values['fout']
-      ferr = ret_values['ferr']
+      fout = Base64.decode64 ret_values['fout']
+      ferr = Base64.decode64 ret_values['ferr']
       
       if ferr.empty?
         [true, fout]
       else
-        error(output)
+        error(ferr)
         [false, ferr]
       end
     end

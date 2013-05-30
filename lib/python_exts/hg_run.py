@@ -6,6 +6,7 @@ import sys
 import re
 import signal
 import json
+import base64
 import resource
 import traceback
 import StringIO
@@ -77,7 +78,7 @@ class HgRun(object):
         fout.close()
         ferr.close()
 
-        return {"fout": fout_value, "ferr": ferr_value}
+        return {"fout": base64.b64encode(fout_value), "ferr": base64.b64encode(ferr_value)}
 
     def _send_data(self, res):
 

@@ -13,7 +13,7 @@ module Mercurial
     end
 
     def content
-      success, output = self.repository.run_command('cat', {'--rev' => revision})
+      success, output = self.repository.run_command('cat', {'--rev' => revision, path => ''})
       return nil unless success
       output
     end
