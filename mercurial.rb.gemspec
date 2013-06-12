@@ -17,5 +17,5 @@ Gem::Specification.new do |gem|
   gem.version       = Mercurial::VERSION
   
   gem.add_dependency 'posix-spawn', '~> 0.3.6'
-  gem.add_development_dependency 'rake', '~> 0.9.2'
+  gem.add_development_dependency 'rake', '~> 10.0.4'
 end
