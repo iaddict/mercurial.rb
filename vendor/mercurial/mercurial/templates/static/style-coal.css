@@ -191,7 +191,7 @@ h3 {
 }
 .bigtable tr { border: none; }
 .bigtable .age { width: 6em; }
-.bigtable .author { width: 12em; }
+.bigtable .author { width: 15em; }
 .bigtable .description { }
 .bigtable .description .base { font-size: 70%; float: right; line-height: 1.66; }
 .bigtable .node { width: 5em; font-family: monospace;}
@@ -322,4 +322,12 @@ ul#graphnodes li .info {
 
 .block {
     border-top: 1px solid #999;
+}
+
+.breadcrumb {
+    color: gray;
+}
+
+.breadcrumb a {
+    color: blue;
 }

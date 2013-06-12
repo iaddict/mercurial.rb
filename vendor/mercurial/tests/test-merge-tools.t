@@ -191,7 +191,7 @@ or true.executable not found in PATH:
   false.whatever=
   true.priority=1
   # hg update -C 1
-  $ hg merge -r 2 --config merge-tools.true.executable=nonexistingmergetool
+  $ hg merge -r 2 --config merge-tools.true.executable=nonexistentmergetool
   merging f
   merging f failed!
   0 files updated, 0 files merged, 0 files removed, 1 files unresolved
@@ -212,7 +212,7 @@ or true.executable with bogus path:
   false.whatever=
   true.priority=1
   # hg update -C 1
-  $ hg merge -r 2 --config merge-tools.true.executable=/nonexisting/mergetool
+  $ hg merge -r 2 --config merge-tools.true.executable=/nonexistent/mergetool
   merging f
   merging f failed!
   0 files updated, 0 files merged, 0 files removed, 1 files unresolved
@@ -336,7 +336,7 @@ merge-patterns specifies executable not found in PATH and gets warning:
   true.priority=1
   true.executable=cat
   # hg update -C 1
-  $ hg merge -r 2 --config merge-patterns.f=true --config merge-tools.true.executable=nonexistingmergetool
+  $ hg merge -r 2 --config merge-patterns.f=true --config merge-tools.true.executable=nonexistentmergetool
   couldn't find merge tool true specified for f
   merging f
   merging f failed!
@@ -359,7 +359,7 @@ merge-patterns specifies executable with bogus path and gets warning:
   true.priority=1
   true.executable=cat
   # hg update -C 1
-  $ hg merge -r 2 --config merge-patterns.f=true --config merge-tools.true.executable=/nonexisting/mergetool
+  $ hg merge -r 2 --config merge-patterns.f=true --config merge-tools.true.executable=/nonexistent/mergetool
   couldn't find merge tool true specified for f
   merging f
   merging f failed!
@@ -773,6 +773,34 @@ Merge using tool with a path that must be quoted:
   # hg stat
   M f
 
+Issue3581: Merging a filename that needs to be quoted
+(This test doesn't work on Windows filesystems even on Linux, so check
+for Unix-like permission)
+
+#if unix-permissions
+  $ beforemerge
+  [merge-tools]
+  false.whatever=
+  true.priority=1
+  true.executable=cat
+  # hg update -C 1
+  $ echo "revision 4" > '"; exit 1; echo "'
+  $ hg commit -Am "revision 4"
+  adding "; exit 1; echo "
+  warning: filename contains '"', which is reserved on Windows: '"; exit 1; echo "'
+  $ hg update -C 1 > /dev/null
+  $ echo "revision 5" > '"; exit 1; echo "'
+  $ hg commit -Am "revision 5"
+  adding "; exit 1; echo "
+  warning: filename contains '"', which is reserved on Windows: '"; exit 1; echo "'
+  created new head
+  $ hg merge --config merge-tools.true.executable="true" -r 4
+  merging "; exit 1; echo "
+  0 files updated, 1 files merged, 0 files removed, 0 files unresolved
+  (branch merge, don't forget to commit)
+  $ hg update -C 1 > /dev/null
+#endif
+
 Merge post-processing
 
 cat is a bad merge-tool and doesn't change:
@@ -804,3 +832,21 @@ cat is a bad merge-tool and doesn't change:
   # hg stat
   M f
   ? f.orig
+
+#if symlink
+
+internal merge cannot handle symlinks and shouldn't try:
+
+  $ hg update -q -C 1
+  $ rm f
+  $ ln -s symlink f
+  $ hg commit -qm 'f is symlink'
+  $ hg merge -r 2 --tool internal:merge
+  merging f
+  warning: internal:merge cannot merge symlinks for f
+  merging f incomplete! (edit conflicts, then use 'hg resolve --mark')
+  0 files updated, 0 files merged, 0 files removed, 1 files unresolved
+  use 'hg resolve' to retry unresolved file merges or 'hg update -C .' to abandon
+  [1]
+
+#endif

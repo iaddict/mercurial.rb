@@ -198,11 +198,11 @@ add an untracked file
 status --mq with color (issue2096)
 
   $ hg status --mq --config extensions.color= --config color.mode=ansi --color=always
-  \x1b[0;32;1mA .hgignore\x1b[0m (esc)
-  \x1b[0;32;1mA A\x1b[0m (esc)
-  \x1b[0;32;1mA B\x1b[0m (esc)
-  \x1b[0;32;1mA series\x1b[0m (esc)
-  \x1b[0;35;1;4m? flaf\x1b[0m (esc)
+  \x1b[0;32;1mA \x1b[0m\x1b[0;32;1m.hgignore\x1b[0m (esc)
+  \x1b[0;32;1mA \x1b[0m\x1b[0;32;1mA\x1b[0m (esc)
+  \x1b[0;32;1mA \x1b[0m\x1b[0;32;1mB\x1b[0m (esc)
+  \x1b[0;32;1mA \x1b[0m\x1b[0;32;1mseries\x1b[0m (esc)
+  \x1b[0;35;1;4m? \x1b[0m\x1b[0;35;1;4mflaf\x1b[0m (esc)
 
 try the --mq option on a command provided by an extension
 
@@ -1110,8 +1110,14 @@ refresh omitting an added file
   $ hg qpop
   popping baz
   now at: bar
-  $ hg qdel baz
 
+test qdel/qrm
+
+  $ hg qdel baz
+  $ echo p >> .hg/patches/series
+  $ hg qrm p
+  $ hg qser
+  bar
 
 create a git patch
 
@@ -1548,5 +1554,26 @@ Test that qfinish preserve phase when mq.secret=false
   0: draft
   1: secret
   2: secret
+
+Test that secret mq patch does not break hgweb
+
+  $ cat > hgweb.cgi <<HGWEB
+  > from mercurial import demandimport; demandimport.enable()
+  > from mercurial.hgweb import hgweb
+  > from mercurial.hgweb import wsgicgi
+  > import cgitb
+  > cgitb.enable()
+  > app = hgweb('.', 'test')
+  > wsgicgi.launch(app)
+  > HGWEB
+  $ . "$TESTDIR/cgienv"
+#if msys
+  $ PATH_INFO=//tags; export PATH_INFO
+#else
+  $ PATH_INFO=/tags; export PATH_INFO
+#endif
+  $ QUERY_STRING='style=raw'
+  $ python hgweb.cgi | grep '^tip'
+  tip	[0-9a-f]{40} (re)
 
   $ cd ..

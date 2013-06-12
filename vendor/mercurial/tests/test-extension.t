@@ -112,7 +112,8 @@ Check hgweb's load order:
   > wsgicgi.launch(application)
   > EOF
 
-  $ SCRIPT_NAME='/' SERVER_PORT='80' SERVER_NAME='localhost' python hgweb.cgi \
+  $ REQUEST_METHOD='GET' PATH_INFO='/' SCRIPT_NAME='' QUERY_STRING='' \
+  >    SERVER_PORT='80' SERVER_NAME='localhost' python hgweb.cgi \
   >    | grep '^[0-9]) ' # ignores HTML output
   1) foo imported
   1) bar imported
@@ -200,6 +201,7 @@ hide outer repo
       --profile           print command execution profile
       --version           output version information and exit
    -h --help              display help and exit
+      --hidden            consider hidden changesets
   
   [+] marked option can be specified multiple times
 
@@ -230,6 +232,7 @@ hide outer repo
       --profile           print command execution profile
       --version           output version information and exit
    -h --help              display help and exit
+      --hidden            consider hidden changesets
   
   [+] marked option can be specified multiple times
   $ echo 'debugextension = !' >> $HGRCPATH
@@ -269,7 +272,7 @@ Extension module help vs command help:
   
   [+] marked option can be specified multiple times
   
-  use "hg -v help extdiff" to show more info
+  use "hg -v help extdiff" to show the global options
 
   $ hg help --extension extdiff
   extdiff extension - command to allow external programs to compare revisions
@@ -350,6 +353,7 @@ Test help topic with same name as extension
 
   $ hg help multirevs
   Specifying Multiple Revisions
+  """""""""""""""""""""""""""""
   
       When Mercurial accepts more than one revision, they may be specified
       individually, or provided as a topologically continuous range, separated
@@ -372,7 +376,7 @@ Test help topic with same name as extension
   
   multirevs command
   
-  use "hg -v help multirevs" to show more info
+  use "hg -v help multirevs" to show the global options
 
   $ hg multirevs
   hg multirevs: invalid arguments
@@ -497,6 +501,16 @@ No declared supported version, extension complains:
   ** If that fixes the bug please report it to the extension author.
   ** Python * (glob)
   ** Mercurial Distributed SCM * (glob)
+  ** Extensions loaded: throw
+empty declaration of supported version, extension complains:
+  $ echo "testedwith = ''" >> throw.py
+  $ hg --config extensions.throw=throw.py throw 2>&1 | egrep '^\*\*'
+  ** Unknown exception encountered with possibly-broken third-party extension throw
+  ** which supports versions unknown of Mercurial.
+  ** Please disable throw and try your action again.
+  ** If that fixes the bug please report it to the extension author.
+  ** Python * (glob)
+  ** Mercurial Distributed SCM (*) (glob)
   ** Extensions loaded: throw
 If the extension specifies a buglink, show that:
   $ echo 'buglink = "http://example.com/bts"' >> throw.py

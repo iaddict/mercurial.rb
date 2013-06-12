@@ -204,8 +204,8 @@ table tr td {
 table tr td.nowrap {
   white-space: nowrap;
 }
-table tr td.closed { 
-  background-color: #99f; 
+table tr td.closed {
+  background-color: #99f;
 }
 /*
 table tr.parity0:hover,
@@ -524,3 +524,7 @@ ul#graphnodes li .info {
     border-top: 1px solid #999;
 }
 /** end of comparison **/
+
+.breadcrumb a:hover {
+    text-decoration:underline;
+}

@@ -8,7 +8,7 @@
 '''commands to interactively select changes for commit/qrefresh'''
 
 from mercurial.i18n import gettext, _
-from mercurial import cmdutil, commands, extensions, hg, mdiff, patch
+from mercurial import cmdutil, commands, extensions, hg, patch
 from mercurial import util
 import copy, cStringIO, errno, os, re, shutil, tempfile
 
@@ -33,7 +33,7 @@ def scanpatch(fp):
     - ('file',    [header_lines + fromfile + tofile])
     - ('context', [context_lines])
     - ('hunk',    [hunk_lines])
-    - ('range',   (-start,len, +start,len, diffp))
+    - ('range',   (-start,len, +start,len, proc))
     """
     lr = patch.linereader(fp)
 
@@ -76,12 +76,12 @@ def scanpatch(fp):
             if m:
                 yield 'range', m.groups()
             else:
-                raise patch.PatchError('unknown patch content: %r' % line)
+                yield 'other', line
 
 class header(object):
     """patch header
 
-    XXX shoudn't we move this to mercurial/patch.py ?
+    XXX shouldn't we move this to mercurial/patch.py ?
     """
     diffgit_re = re.compile('diff --git a/(.*) b/(.*)$')
     diff_re = re.compile('diff -r .* (.*)$')
@@ -228,6 +228,9 @@ def parsepatch(fp):
             self.headers.append(h)
             self.header = h
 
+        def addother(self, line):
+            pass # 'other' lines are ignored
+
         def finished(self):
             self.addcontext([])
             return self.headers
@@ -239,12 +242,14 @@ def parsepatch(fp):
                      'range': addrange},
             'context': {'file': newfile,
                         'hunk': addhunk,
-                        'range': addrange},
+                        'range': addrange,
+                        'other': addother},
             'hunk': {'context': addcontext,
                      'file': newfile,
                      'range': addrange},
             'range': {'context': addcontext,
                       'hunk': addhunk},
+            'other': {'other': addother},
             }
 
     p = parser()
@@ -393,11 +398,11 @@ the hunk is left unchanged.
             if skipfile is None and skipall is None:
                 chunk.pretty(ui)
             if total == 1:
-                msg = _('record this change to %r?') % chunk.filename()
+                msg = _("record this change to '%s'?") % chunk.filename()
             else:
                 idx = pos - len(h.hunks) + i
-                msg = _('record change %d/%d to %r?') % (idx, total,
-                                                         chunk.filename())
+                msg = _("record change %d/%d to '%s'?") % (idx, total,
+                                                           chunk.filename())
             r, skipfile, skipall, newpatches = prompt(skipfile,
                     skipall, msg, chunk)
             if r:
@@ -496,6 +501,9 @@ def dorecord(ui, repo, commitfunc, cmdsuggest, backupall, *pats, **opts):
         raise util.Abort(_('running non-interactively, use %s instead') %
                          cmdsuggest)
 
+    # make sure username is set before going interactive
+    ui.username()
+
     def recordfunc(ui, repo, message, match, opts):
         """This is generic record driver.
 
@@ -517,18 +525,22 @@ def dorecord(ui, repo, commitfunc, cmdsuggest, backupall, *pats, **opts):
                                '(use "hg commit" instead)'))
 
         changes = repo.status(match=match)[:3]
-        diffopts = mdiff.diffopts(
+        diffopts = patch.diffopts(ui, opts=dict(
             git=True, nodates=True,
             ignorews=opts.get('ignore_all_space'),
             ignorewsamount=opts.get('ignore_space_change'),
-            ignoreblanklines=opts.get('ignore_blank_lines'))
+            ignoreblanklines=opts.get('ignore_blank_lines')))
         chunks = patch.diff(repo, changes=changes, opts=diffopts)
         fp = cStringIO.StringIO()
         fp.write(''.join(chunks))
         fp.seek(0)
 
         # 1. filter patch, so we have intending-to apply subset of it
-        chunks = filterpatch(ui, parsepatch(fp))
+        try:
+            chunks = filterpatch(ui, parsepatch(fp))
+        except patch.PatchError, err:
+            raise util.Abort(_('error parsing patch: %s') % err)
+
         del fp
 
         contenders = set()
@@ -664,3 +676,5 @@ def uisetup(ui):
 def _wrapcmd(cmd, table, wrapfn, msg):
     entry = extensions.wrapcommand(table, cmd, wrapfn)
     entry[1].append(('i', 'interactive', None, msg))
+
+commands.inferrepo += " record qrecord"

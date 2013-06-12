@@ -16,6 +16,9 @@ Create source repo, and commit adding largefile.
   $ echo large > large
   $ hg add --large large
   $ hg commit -m 'add largefile'
+  $ hg rm large
+  $ hg commit -m 'branchhead without largefile'
+  $ hg up -qr 0
   $ cd ..
 
 Discard all cached largefiles in USERCACHE
@@ -35,42 +38,49 @@ repo as "default" path in .hg/hgrc.
   adding changesets
   adding manifests
   adding file changes
-  added 1 changesets with 1 changes to 1 files
+  added 2 changesets with 1 changes to 1 files
   (run 'hg update' to get a working copy)
-  caching new largefiles
-  0 largefiles cached
 
 Update working directory to "tip", which requires largefile("large"),
 but there is no cache file for it.  So, hg must treat it as
 "missing"(!) file.
 
-  $ hg update
-  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  $ hg update -r0
   getting changed largefiles
-  large: can't get file locally
-  (no default or default-push path set in hgrc)
+  large: largefile 7f7097b041ccf68cc5561e9600da4655d21c6d18 not available from file:$TESTTMP/mirror (glob)
   0 largefiles updated, 0 removed
+  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ hg status
   ! large
 
 Update working directory to null: this cleanup .hg/largefiles/dirstate
 
   $ hg update null
-  0 files updated, 0 files merged, 1 files removed, 0 files unresolved
   getting changed largefiles
   0 largefiles updated, 0 removed
+  0 files updated, 0 files merged, 1 files removed, 0 files unresolved
 
 Update working directory to tip, again.
 
-  $ hg update
-  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  $ hg update -r0
   getting changed largefiles
-  large: can't get file locally
-  (no default or default-push path set in hgrc)
+  large: largefile 7f7097b041ccf68cc5561e9600da4655d21c6d18 not available from file:$TESTTMP/mirror (glob)
   0 largefiles updated, 0 removed
+  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ hg status
   ! large
   $ cd ..
+
+Verify that largefiles from pulled branchheads are fetched, also to an empty repo
+
+  $ hg init mirror2
+  $ hg -R mirror2 pull src -r0
+  pulling from src
+  adding changesets
+  adding manifests
+  adding file changes
+  added 1 changesets with 1 changes to 1 files
+  (run 'hg update' to get a working copy)
 
 #if unix-permissions
 
@@ -92,6 +102,7 @@ from file in working copy:
   $ chmod 660 large
   $ echo change >> large
   $ hg commit -m change
+  created new head
   $ ../ls-l.py .hg/largefiles/e151b474069de4ca6898f67ce2f2a7263adf8fea
   640
 

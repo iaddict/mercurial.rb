@@ -263,9 +263,10 @@ Rebase and collapse - E onto H:
 
 
 Test that branchheads cache is updated correctly when doing a strip in which
-the parent of the ancestor node to be stripped does not become a head and
-also, the parent of a node that is a child of the node stripped becomes a head
-(node 3).
+the parent of the ancestor node to be stripped does not become a head and also,
+the parent of a node that is a child of the node stripped becomes a head (node
+3). The code is now much simpler and we could just test a simpler scenario
+We keep it the test this way in case new complexity is injected.
 
   $ hg clone -q -u . b b2
   $ cd b2
@@ -274,7 +275,7 @@ also, the parent of a node that is a child of the node stripped becomes a head
   7:c65502d4178782309ce0574c5ae6ee9485a9bafa default
   6:c772a8b2dc17629cec88a19d09c926c4814b12c7 default
 
-  $ cat $TESTTMP/b2/.hg/cache/branchheads
+  $ cat $TESTTMP/b2/.hg/cache/branchheads-served
   c65502d4178782309ce0574c5ae6ee9485a9bafa 7
   c772a8b2dc17629cec88a19d09c926c4814b12c7 default
   c65502d4178782309ce0574c5ae6ee9485a9bafa default
@@ -282,7 +283,7 @@ also, the parent of a node that is a child of the node stripped becomes a head
   $ hg strip 4
   saved backup bundle to $TESTTMP/b2/.hg/strip-backup/8a5212ebc852-backup.hg (glob)
 
-  $ cat $TESTTMP/b2/.hg/cache/branchheads
+  $ cat $TESTTMP/b2/.hg/cache/branchheads-served
   c65502d4178782309ce0574c5ae6ee9485a9bafa 4
   2870ad076e541e714f3c2bc32826b5c6a6e5b040 default
   c65502d4178782309ce0574c5ae6ee9485a9bafa default
@@ -495,15 +496,15 @@ Interactions between collapse and keepbranches
   $ hg ci -Am 'A'
   adding a
 
-  $ hg branch '1'
-  marked working directory as branch 1
+  $ hg branch 'one'
+  marked working directory as branch one
   (branches are permanent and global, did you want a bookmark?)
   $ echo 'b' > b
   $ hg ci -Am 'B'
   adding b
 
-  $ hg branch '2'
-  marked working directory as branch 2
+  $ hg branch 'two'
+  marked working directory as branch two
   (branches are permanent and global, did you want a bookmark?)
   $ echo 'c' > c
   $ hg ci -Am 'C'
@@ -517,9 +518,9 @@ Interactions between collapse and keepbranches
   $ hg tglog
   @  3: 'D'
   |
-  | o  2: 'C' 2
+  | o  2: 'C' two
   | |
-  | o  1: 'B' 1
+  | o  1: 'B' one
   |/
   o  0: 'A'
   
@@ -545,9 +546,9 @@ Interactions between collapse and keepbranches
   |/
   o  3: 'D'
   |
-  | o  2: 'C' 2
+  | o  2: 'C' two
   | |
-  | o  1: 'B' 1
+  | o  1: 'B' one
   |/
   o  0: 'A'
   
@@ -558,9 +559,9 @@ Interactions between collapse and keepbranches
   |
   o  3: 'D'
   |
-  | o  2: 'C' 2
+  | o  2: 'C' two
   | |
-  | o  1: 'B' 1
+  | o  1: 'B' one
   |/
   o  0: 'A'
   
@@ -568,6 +569,7 @@ Interactions between collapse and keepbranches
   # HG changeset patch
   # User user1
   # Date 0 0
+  #      Thu Jan 01 00:00:00 1970 +0000
   # Node ID f338eb3c2c7cc5b5915676a2376ba7ac558c5213
   # Parent  41acb9dca9eb976e84cd21fcb756b4afa5a35c09
   E
@@ -717,6 +719,30 @@ Test stripping a revision with another child
 
   $ cd ..
 
+Test collapsing changes that add then remove a file
 
+  $ hg init collapseaddremove
+  $ cd collapseaddremove
 
+  $ touch base
+  $ hg commit -Am base
+  adding base
+  $ touch a
+  $ hg commit -Am a
+  adding a
+  $ hg rm a
+  $ touch b
+  $ hg commit -Am b
+  adding b
+  $ hg rebase -d 0 -r "1::2" --collapse -m collapsed
+  saved backup bundle to $TESTTMP/collapseaddremove/.hg/strip-backup/*-backup.hg (glob)
+  $ hg tglog
+  @  1: 'collapsed'
+  |
+  o  0: 'base'
+  
+  $ hg manifest
+  b
+  base
 
+  $ cd ..

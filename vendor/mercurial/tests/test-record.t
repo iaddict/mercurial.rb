@@ -246,18 +246,27 @@ Add plain file
   +9
   +10
   
-
-Modify end of plain file
+Modify end of plain file with username unset
 
   $ echo 11 >> plain
-  $ hg record -d '8 0' -m end plain <<EOF
+  $ unset HGUSER
+  $ hg record --config ui.username= -d '8 0' -m end plain
+  abort: no username supplied (see "hg help config")
+  [255]
+
+
+Modify end of plain file, also test that diffopts are accounted for
+
+  $ HGUSER="test"
+  $ export HGUSER
+  $ hg record --config diff.showfunc=true -d '8 0' -m end plain <<EOF
   > y
   > y
   > EOF
   diff --git a/plain b/plain
   1 hunks, 1 lines changed
   examine changes to 'plain'? [Ynesfdaq?] 
-  @@ -8,3 +8,4 @@
+  @@ -8,3 +8,4 @@ 7
    8
    9
    10
@@ -1027,10 +1036,11 @@ Abort early when a merge is in progress
   $ hg up -C
   0 files updated, 0 files merged, 1 files removed, 0 files unresolved
 
-Editing patch
+Editing patch (and ignoring trailing text)
 
   $ cat > editor.sh << '__EOF__'
-  > sed -e 7d -e '5s/^-/ /' "$1" > tmp
+  > sed -e 7d -e '5s/^-/ /' -e '/^# ---/i\
+  > trailing\nditto' "$1" > tmp
   > mv tmp "$1"
   > __EOF__
   $ cat > editedfile << '__EOF__'
@@ -1167,6 +1177,56 @@ Invalid patch
   +That change will not be committed
   +That is the second line
   +That line has been added
+
+Malformed patch - error handling
+
+  $ cat > editor.sh << '__EOF__'
+  > sed -e '/^@/p' "$1" > tmp
+  > mv tmp "$1"
+  > __EOF__
+  $ HGEDITOR="\"sh\" \"`pwd`/editor.sh\"" hg record <<EOF
+  > y
+  > e
+  > EOF
+  diff --git a/editedfile b/editedfile
+  1 hunks, 3 lines changed
+  examine changes to 'editedfile'? [Ynesfdaq?] 
+  @@ -1,3 +1,3 @@
+  -This is the first line
+  -This change will be committed
+  -This is the third line
+  +This change will not be committed
+  +This is the second line
+  +This line has been added
+  record this change to 'editedfile'? [Ynesfdaq?] 
+  abort: error parsing patch: unhandled transition: range -> range
+  [255]
+
+random text in random positions is still an error
+
+  $ cat > editor.sh << '__EOF__'
+  > sed -e '/^@/i\
+  > other' "$1" > tmp
+  > mv tmp "$1"
+  > __EOF__
+  $ HGEDITOR="\"sh\" \"`pwd`/editor.sh\"" hg record <<EOF
+  > y
+  > e
+  > EOF
+  diff --git a/editedfile b/editedfile
+  1 hunks, 3 lines changed
+  examine changes to 'editedfile'? [Ynesfdaq?] 
+  @@ -1,3 +1,3 @@
+  -This is the first line
+  -This change will be committed
+  -This is the third line
+  +This change will not be committed
+  +This is the second line
+  +This line has been added
+  record this change to 'editedfile'? [Ynesfdaq?] 
+  abort: error parsing patch: unhandled transition: file -> other
+  [255]
+
   $ hg up -C
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
 

@@ -5,8 +5,7 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-import base64, errno
-import os
+import base64, errno, subprocess, os, datetime
 import cPickle as pickle
 from mercurial import util
 from mercurial.i18n import _
@@ -146,6 +145,11 @@ class converter_source(object):
         """
         return False
 
+    def hasnativeclose(self):
+        """Return true if this source has ability to close branch.
+        """
+        return False
+
     def lookuprev(self, rev):
         """If rev is a meaningful revision reference in source, return
         the referenced identifier in the same format used by getcommit().
@@ -260,7 +264,7 @@ class commandline(object):
     def postrun(self):
         pass
 
-    def _cmdline(self, cmd, closestdin, *args, **kwargs):
+    def _cmdline(self, cmd, *args, **kwargs):
         cmdline = [self.command, cmd] + list(args)
         for k, v in kwargs.iteritems():
             if len(k) == 1:
@@ -276,20 +280,23 @@ class commandline(object):
                 pass
         cmdline = [util.shellquote(arg) for arg in cmdline]
         if not self.ui.debugflag:
-            cmdline += ['2>', util.nulldev]
-        if closestdin:
-            cmdline += ['<', util.nulldev]
+            cmdline += ['2>', os.devnull]
         cmdline = ' '.join(cmdline)
         return cmdline
 
     def _run(self, cmd, *args, **kwargs):
-        return self._dorun(util.popen, cmd, True, *args, **kwargs)
+        def popen(cmdline):
+            p = subprocess.Popen(cmdline, shell=True, bufsize=-1,
+                    close_fds=util.closefds,
+                    stdout=subprocess.PIPE)
+            return p
+        return self._dorun(popen, cmd, *args, **kwargs)
 
     def _run2(self, cmd, *args, **kwargs):
-        return self._dorun(util.popen2, cmd, False, *args, **kwargs)
+        return self._dorun(util.popen2, cmd, *args, **kwargs)
 
-    def _dorun(self, openfunc, cmd, closestdin, *args, **kwargs):
-        cmdline = self._cmdline(cmd, closestdin, *args, **kwargs)
+    def _dorun(self, openfunc, cmd,  *args, **kwargs):
+        cmdline = self._cmdline(cmd, *args, **kwargs)
         self.ui.debug('running: %s\n' % (cmdline,))
         self.prerun()
         try:
@@ -298,16 +305,17 @@ class commandline(object):
             self.postrun()
 
     def run(self, cmd, *args, **kwargs):
-        fp = self._run(cmd, *args, **kwargs)
-        output = fp.read()
+        p = self._run(cmd, *args, **kwargs)
+        output = p.communicate()[0]
         self.ui.debug(output)
-        return output, fp.close()
+        return output, p.returncode
 
     def runlines(self, cmd, *args, **kwargs):
-        fp = self._run(cmd, *args, **kwargs)
-        output = fp.readlines()
+        p = self._run(cmd, *args, **kwargs)
+        output = p.stdout.readlines()
+        p.wait()
         self.ui.debug(''.join(output))
-        return output, fp.close()
+        return output, p.returncode
 
     def checkexit(self, status, output=''):
         if status:
@@ -345,8 +353,8 @@ class commandline(object):
         # (and make happy Windows shells while doing this).
         return argmax // 2 - 1
 
-    def limit_arglist(self, arglist, cmd, closestdin, *args, **kwargs):
-        cmdlen = len(self._cmdline(cmd, closestdin, *args, **kwargs))
+    def _limit_arglist(self, arglist, cmd, *args, **kwargs):
+        cmdlen = len(self._cmdline(cmd, *args, **kwargs))
         limit = self.argmax - cmdlen
         bytes = 0
         fl = []
@@ -363,7 +371,7 @@ class commandline(object):
             yield fl
 
     def xargs(self, arglist, cmd, *args, **kwargs):
-        for l in self.limit_arglist(arglist, cmd, True, *args, **kwargs):
+        for l in self._limit_arglist(arglist, cmd, *args, **kwargs):
             self.run0(cmd, *(list(args) + l), **kwargs)
 
 class mapfile(dict):
@@ -443,3 +451,10 @@ def parsesplicemap(path):
         if e.errno != errno.ENOENT:
             raise
     return m
+
+def makedatetimestamp(t):
+    """Like util.makedate() but for time t instead of current time"""
+    delta = (datetime.datetime.utcfromtimestamp(t) -
+             datetime.datetime.fromtimestamp(t))
+    tz = delta.days * 86400 + delta.seconds
+    return t, tz

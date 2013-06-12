@@ -44,6 +44,7 @@ class config(object):
     def __init__(self, data=None):
         self._data = {}
         self._source = {}
+        self._unset = []
         if data:
             for k in data._data:
                 self._data[k] = data[k].copy()
@@ -58,6 +59,10 @@ class config(object):
         for d in self.sections():
             yield d
     def update(self, src):
+        for s, n in src._unset:
+            if s in self and n in self._data[s]:
+                del self._data[s][n]
+                del self._source[(s, n)]
         for s in src:
             if s not in self:
                 self._data[s] = sortdict()
@@ -67,9 +72,9 @@ class config(object):
         return self._data.get(section, {}).get(item, default)
 
     def backup(self, section, item):
-        """return a tuple allowing restore to reinstall a previous valuesi
+        """return a tuple allowing restore to reinstall a previous value
 
-        The main reason we need it is because it handle the "no data" case.
+        The main reason we need it is because it handles the "no data" case.
         """
         try:
             value = self._data[section][item]
@@ -173,6 +178,7 @@ class config(object):
                     continue
                 if self.get(section, name) is not None:
                     del self._data[section][name]
+                self._unset.append((section, name))
                 continue
 
             raise error.ParseError(l.rstrip(), ("%s:%s" % (src, line)))

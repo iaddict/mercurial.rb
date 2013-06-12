@@ -507,11 +507,12 @@ amend
   $ hg -q commit -d '14 1' -m 'prepare amend'
 
   $ hg --debug commit --amend -d '15 1' -m 'amend without changes' | grep keywords
+  invalid branchheads cache (served): tip differs
   overwriting a expanding keywords
   $ hg -q id
-  577e60613a88
+  67d8c481a6be
   $ head -1 a
-  expand $Id: a,v 577e60613a88 1970/01/01 00:00:15 test $
+  expand $Id: a,v 67d8c481a6be 1970/01/01 00:00:15 test $
 
   $ hg -q strip -n tip
 
@@ -527,6 +528,7 @@ Keywords should not be expanded in patch
   # HG changeset patch
   # User User Name <user@example.com>
   # Date 1 0
+  #      Thu Jan 01 00:00:01 1970 +0000
   # Node ID 40a904bbbe4cd4ab0a1f28411e35db26341a40ad
   # Parent  ef63ca68695bc9495032c6fda1350c71e6d256e9
   cndiff
@@ -576,9 +578,10 @@ Copy and show added kwfiles
 Commit and show expansion in original and copy
 
   $ hg --debug commit -ma2c -d '1 0' -u 'User Name <user@example.com>'
+  invalid branchheads cache (served): tip differs
   c
    c: copy a:0045e12f6c5791aac80ca6cbfd97709a88307292
-  removing unknown node 40a904bbbe4c from 1-phase boundary
+  invalid branchheads cache (served): tip differs
   overwriting c expanding keywords
   committed changeset 2:25736cf2f5cbe41f6be4e6784ef6ecf9f3bbcc7d
   $ cat a c
@@ -727,7 +730,7 @@ Cat and hg cat files before custom expansion
   ignore $Id$
   a
 
-Write custom keyword and prepare multiline commit message
+Write custom keyword and prepare multi-line commit message
 
   $ echo '$Xinfo$' >> a
   $ cat <<EOF >> log
@@ -745,11 +748,24 @@ Interrupted commit should not change state
   ? c
   ? log
 
-Commit with multiline message and custom expansion
+Commit with multi-line message and custom expansion
+
+|Note:
+|
+| After the last rollback, the "served" branchheads cache became invalid, but
+| all changesets in the repo were public. For filtering this means:
+|   "immutable" == "served" == ø.
+|
+| As the "served" cache is invalid, we fall back to the "immutable" cache. But
+| no update is needed between "immutable" and "served" and the "served" cache
+| is not updated on disk. The on-disk version therefore stays invalid for some
+| time. This explains why the "served" branchheads cache is detected as
+| invalid here.
 
   $ hg --debug commit -l log -d '2 0' -u 'User Name <user@example.com>'
+  invalid branchheads cache (served): tip differs
   a
-  removing unknown node 40a904bbbe4c from 1-phase boundary
+  invalid branchheads cache (served): tip differs
   overwriting a expanding keywords
   committed changeset 2:bb948857c743469b22bbf51f7ec8112279ca5d83
   $ rm log
@@ -814,7 +830,7 @@ Clone to test global and local configurations
 
   $ cd ..
 
-Expansion in destinaton with global configuration
+Expansion in destination with global configuration
 
   $ hg --quiet clone Test globalconf
   $ cat globalconf/a
@@ -998,7 +1014,7 @@ Prepare merge and resolve tests
 
   $ echo '$Id$' > m
   $ hg add m
-  $ hg commit -m 4kw 
+  $ hg commit -m 4kw
   $ echo foo >> m
   $ hg commit -m 5foo
 

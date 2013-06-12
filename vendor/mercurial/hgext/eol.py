@@ -99,7 +99,7 @@ testedwith = 'internal'
 # Matches a lone LF, i.e., one that is not part of CRLF.
 singlelf = re.compile('(^|[^\r])\n')
 # Matches a single EOL which can either be a CRLF where repeated CR
-# are removed or a LF. We do not care about old Machintosh files, so a
+# are removed or a LF. We do not care about old Macintosh files, so a
 # stray CR is an error.
 eolre = re.compile('\r*\n')
 
@@ -307,7 +307,7 @@ def reposetup(ui, repo):
                 eolmtime = 0
 
             if eolmtime > cachemtime:
-                ui.debug("eol: detected change in .hgeol\n")
+                self.ui.debug("eol: detected change in .hgeol\n")
                 wlock = None
                 try:
                     wlock = self.wlock()

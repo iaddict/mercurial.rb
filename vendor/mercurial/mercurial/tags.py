@@ -124,17 +124,18 @@ def _updatetags(filetags, tagtype, alltags, tagtypes):
             continue
 
         # we prefer alltags[name] if:
-        #  it supercedes us OR
-        #  mutual supercedes and it has a higher rank
+        #  it supersedes us OR
+        #  mutual supersedes and it has a higher rank
         # otherwise we win because we're tip-most
         anode, ahist = nodehist
         bnode, bhist = alltags[name]
         if (bnode != anode and anode in bhist and
             (bnode not in ahist or len(bhist) > len(ahist))):
             anode = bnode
+        else:
+            tagtypes[name] = tagtype
         ahist.extend([n for n in bhist if n not in ahist])
         alltags[name] = anode, ahist
-        tagtypes[name] = tagtype
 
 
 # The tag cache only stores info about heads, not the tag contents

@@ -41,6 +41,10 @@ def has_cvs():
     re = r'Concurrent Versions System.*?server'
     return matchoutput('cvs --version 2>&1', re) and not has_msys()
 
+def has_cvs112():
+    re = r'Concurrent Versions System \(CVS\) 1.12.*?server'
+    return matchoutput('cvs --version 2>&1', re) and not has_msys()
+
 def has_darcs():
     return matchoutput('darcs --version', r'2\.[2-9]', True)
 
@@ -118,6 +122,9 @@ def has_fifo():
     except OSError:
         return False
 
+def has_killdaemons():
+    return True
+
 def has_cacheable_fs():
     from mercurial import util
 
@@ -149,7 +156,7 @@ def has_docutils():
         return False
 
 def getsvnversion():
-    m = matchoutput('svn --version 2>&1', r'^svn,\s+version\s+(\d+)\.(\d+)')
+    m = matchoutput('svn --version --quiet 2>&1', r'^(\d+)\.(\d+)')
     if not m:
         return (0, 0)
     return (int(m.group(1)), int(m.group(2)))
@@ -267,6 +274,9 @@ def has_tic():
 def has_msys():
     return os.getenv('MSYSTEM')
 
+def has_aix():
+    return sys.platform.startswith("aix")
+
 checks = {
     "true": (lambda: True, "yak shaving"),
     "false": (lambda: False, "nail clipper"),
@@ -275,6 +285,7 @@ checks = {
     "bzr114": (has_bzr114, "Canonical's Bazaar client >= 1.14"),
     "cacheable": (has_cacheable_fs, "cacheable filesystem"),
     "cvs": (has_cvs, "cvs client/server"),
+    "cvs112": (has_cvs112, "cvs client/server >= 1.12"),
     "darcs": (has_darcs, "darcs client"),
     "docutils": (has_docutils, "Docutils text processing library"),
     "eol-in-paths": (has_eol_in_paths, "end-of-lines in paths"),
@@ -286,6 +297,7 @@ checks = {
     "hardlink": (has_hardlink, "hardlinks"),
     "icasefs": (has_icasefs, "case insensitive file system"),
     "inotify": (has_inotify, "inotify extension support"),
+    "killdaemons": (has_killdaemons, 'killdaemons.py support'),
     "lsprof": (has_lsprof, "python lsprof module"),
     "mtn": (has_mtn, "monotone client (>= 1.0)"),
     "outer-repo": (has_outer_repo, "outer repo"),
@@ -305,4 +317,5 @@ checks = {
     "unix-permissions": (has_unix_permissions, "unix-style permissions"),
     "windows": (has_windows, "Windows"),
     "msys": (has_msys, "Windows with MSYS"),
+    "aix": (has_aix, "AIX"),
 }

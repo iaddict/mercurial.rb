@@ -147,7 +147,7 @@ class converter(object):
         map contains valid revision identifiers and merge the new
         links in the source graph.
         """
-        for c in splicemap:
+        for c in sorted(splicemap):
             if c not in parents:
                 if not self.dest.hascommit(self.map.get(c, c)):
                     # Could be in source but not converted during this run
@@ -167,7 +167,7 @@ class converter(object):
 
     def toposort(self, parents, sortmode):
         '''Return an ordering such that every uncommitted changeset is
-        preceeded by all its uncommitted ancestors.'''
+        preceded by all its uncommitted ancestors.'''
 
         def mapchildren(parents):
             """Return a (children, roots) tuple where 'children' maps parent
@@ -175,7 +175,7 @@ class converter(object):
             revisions without parents. 'parents' must be a mapping of revision
             identifier to its parents ones.
             """
-            visit = parents.keys()
+            visit = sorted(parents)
             seen = set()
             children = {}
             roots = []
@@ -227,6 +227,14 @@ class converter(object):
                 return sorted(nodes, key=keyfn)[0]
             return picknext
 
+        def makeclosesorter():
+            """Close order sort."""
+            keyfn = lambda n: ('close' not in self.commitcache[n].extra,
+                               self.commitcache[n].sortkey)
+            def picknext(nodes):
+                return sorted(nodes, key=keyfn)[0]
+            return picknext
+
         def makedatesorter():
             """Sort revisions by date."""
             dates = {}
@@ -246,6 +254,8 @@ class converter(object):
             picknext = makedatesorter()
         elif sortmode == 'sourcesort':
             picknext = makesourcesorter()
+        elif sortmode == 'closesort':
+            picknext = makeclosesorter()
         else:
             raise util.Abort(_('unknown sort mode: %s') % sortmode)
 
@@ -446,13 +456,15 @@ def convert(ui, src, dest=None, revmapfile=None, **opts):
             shutil.rmtree(path, True)
         raise
 
-    sortmodes = ('branchsort', 'datesort', 'sourcesort')
+    sortmodes = ('branchsort', 'datesort', 'sourcesort', 'closesort')
     sortmode = [m for m in sortmodes if opts.get(m)]
     if len(sortmode) > 1:
         raise util.Abort(_('more than one sort mode specified'))
     sortmode = sortmode and sortmode[0] or defaultsort
     if sortmode == 'sourcesort' and not srcc.hasnativeorder():
         raise util.Abort(_('--sourcesort is not supported by this data source'))
+    if sortmode == 'closesort' and not srcc.hasnativeclose():
+        raise util.Abort(_('--closesort is not supported by this data source'))
 
     fmap = opts.get('filemap')
     if fmap:

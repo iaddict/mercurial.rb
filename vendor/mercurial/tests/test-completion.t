@@ -77,6 +77,7 @@ Show debug commands if there are no other candidates
   debugdag
   debugdata
   debugdate
+  debugdirstate
   debugdiscovery
   debugfileset
   debugfsinfo
@@ -86,16 +87,18 @@ Show debug commands if there are no other candidates
   debugindexdot
   debuginstall
   debugknown
+  debuglabelcomplete
   debugobsolete
+  debugpathcomplete
   debugpushkey
   debugpvec
-  debugrebuildstate
+  debugrebuilddirstate
   debugrename
   debugrevlog
   debugrevspec
   debugsetparents
-  debugstate
   debugsub
+  debugsuccessorssets
   debugwalk
   debugwireargs
 
@@ -122,6 +125,7 @@ Show the global options
   --encoding
   --encodingmode
   --help
+  --hidden
   --noninteractive
   --profile
   --quiet
@@ -152,6 +156,7 @@ Show the options for the "serve" command
   --encodingmode
   --errorlog
   --help
+  --hidden
   --ipv6
   --name
   --noninteractive
@@ -199,9 +204,8 @@ Show all commands + options
   export: output, switch-parent, rev, text, git, nodates
   forget: include, exclude
   init: ssh, remotecmd, insecure
-  log: follow, follow-first, date, copies, keyword, rev, removed, only-merges, user, only-branch, branch, prune, hidden, patch, git, limit, no-merges, stat, graph, style, template, include, exclude
+  log: follow, follow-first, date, copies, keyword, rev, removed, only-merges, user, only-branch, branch, prune, patch, git, limit, no-merges, stat, graph, style, template, include, exclude
   merge: force, rev, preview, tool
-  phase: public, draft, secret, force, rev
   pull: update, force, rev, bookmark, branch, ssh, remotecmd, insecure
   push: force, rev, bookmark, branch, new-branch, ssh, remotecmd, insecure
   remove: after, force, include, exclude
@@ -228,8 +232,9 @@ Show all commands + options
   debugdag: tags, branches, dots, spaces
   debugdata: changelog, manifest
   debugdate: extended
+  debugdirstate: nodates, datesort
   debugdiscovery: old, nonheads, ssh, remotecmd, insecure
-  debugfileset: 
+  debugfileset: rev
   debugfsinfo: 
   debuggetbundle: head, common, type
   debugignore: 
@@ -237,16 +242,18 @@ Show all commands + options
   debugindexdot: 
   debuginstall: 
   debugknown: 
-  debugobsolete: date, user
+  debuglabelcomplete: 
+  debugobsolete: flags, date, user
+  debugpathcomplete: full, normal, added, removed
   debugpushkey: 
   debugpvec: 
-  debugrebuildstate: rev
+  debugrebuilddirstate: rev
   debugrename: rev
   debugrevlog: changelog, manifest, dump
   debugrevspec: 
   debugsetparents: 
-  debugstate: nodates, datesort
   debugsub: rev
+  debugsuccessorssets: 
   debugwalk: include, exclude
   debugwireargs: three, four, five, ssh, remotecmd, insecure
   graft: rev, continue, edit, log, currentdate, currentuser, date, user, tool, dry-run
@@ -261,6 +268,7 @@ Show all commands + options
   outgoing: force, rev, newest-first, bookmarks, branch, patch, git, limit, no-merges, stat, graph, style, template, ssh, remotecmd, insecure, subrepos
   parents: rev, style, template
   paths: 
+  phase: public, draft, secret, force, rev
   recover: 
   rename: after, force, include, exclude, dry-run
   resolve: all, list, mark, unmark, no-status, tool, include, exclude
@@ -274,3 +282,57 @@ Show all commands + options
   unbundle: update
   verify: 
   version: 
+
+  $ hg init a
+  $ cd a
+  $ echo fee > fee
+  $ hg ci -q -Amfee
+  $ hg tag fee
+  $ mkdir fie
+  $ echo dead > fie/dead
+  $ echo live > fie/live
+  $ hg bookmark fo
+  $ hg branch -q fie
+  $ hg ci -q -Amfie
+  $ echo fo > fo
+  $ hg branch -qf default
+  $ hg ci -q -Amfo
+  $ echo Fum > Fum
+  $ hg ci -q -AmFum
+  $ hg bookmark Fum
+
+Test debugpathcomplete
+
+  $ hg debugpathcomplete f
+  fee
+  fie/
+  fo
+  $ hg debugpathcomplete -f f
+  fee
+  fie/dead
+  fie/live
+  fo
+
+  $ hg rm Fum
+  $ hg debugpathcomplete -r F
+  Fum
+
+If one directory and no files match, give an ambiguous answer
+
+  $ hg debugpathcomplete fi
+  fie/
+  fie/.
+
+Test debuglabelcomplete
+
+  $ hg debuglabelcomplete
+  Fum
+  default
+  fee
+  fie
+  fo
+  tip
+  $ hg debuglabelcomplete f
+  fee
+  fie
+  fo

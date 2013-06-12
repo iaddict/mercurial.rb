@@ -7,7 +7,7 @@
 
 from i18n import _
 import osutil, encoding
-import errno, msvcrt, os, re, sys, _winreg
+import errno, msvcrt, os, re, stat, sys, _winreg
 
 import win32
 executablepath = win32.executablepath
@@ -20,11 +20,11 @@ samedevice = win32.samedevice
 samefile = win32.samefile
 setsignalhandler = win32.setsignalhandler
 spawndetached = win32.spawndetached
+split = os.path.split
 termwidth = win32.termwidth
 testpid = win32.testpid
 unlink = win32.unlink
 
-nulldev = 'NUL:'
 umask = 0022
 
 # wrap osutil.posixfile to provide friendlier exceptions
@@ -153,7 +153,7 @@ def samestat(s1, s2):
 #   backslash
 # (See http://msdn2.microsoft.com/en-us/library/a1y7w461.aspx )
 # So, to quote a string, we must surround it in double quotes, double
-# the number of backslashes that preceed double quotes and add another
+# the number of backslashes that precede double quotes and add another
 # backslash before every double quote (being careful with the double
 # quote we've appended to the end)
 _quotere = None
@@ -174,7 +174,7 @@ def popen(command, mode='r'):
     # Work around "popen spawned process may not write to stdout
     # under windows"
     # http://bugs.python.org/issue1366
-    command += " 2> %s" % nulldev
+    command += " 2> %s" % os.devnull
     return os.popen(quotecommand(command), mode)
 
 def explainexit(code):
@@ -213,10 +213,15 @@ def findexe(command):
             return executable
     return findexisting(os.path.expanduser(os.path.expandvars(command)))
 
+_wantedkinds = set([stat.S_IFREG, stat.S_IFLNK])
+
 def statfiles(files):
-    '''Stat each file in files and yield stat or None if file does not exist.
+    '''Stat each file in files. Yield each stat, or None if a file
+    does not exist or has a type we don't care about.
+
     Cluster and cache stat per directory to minimize number of OS stat calls.'''
     dircache = {} # dirname -> filename -> status | None if file does not exist
+    getkind = stat.S_IFMT
     for nf in files:
         nf  = normcase(nf)
         dir, base = os.path.split(nf)
@@ -226,7 +231,8 @@ def statfiles(files):
         if cache is None:
             try:
                 dmap = dict([(normcase(n), s)
-                    for n, k, s in osutil.listdir(dir, True)])
+                             for n, k, s in osutil.listdir(dir, True)
+                             if getkind(s.st_mode) in _wantedkinds])
             except OSError, err:
                 # handle directory not found in Python version prior to 2.5
                 # Python <= 2.4 returns native Windows code 3 in errno
@@ -269,9 +275,13 @@ def _removedirs(name):
             break
         head, tail = os.path.split(head)
 
-def unlinkpath(f):
+def unlinkpath(f, ignoremissing=False):
     """unlink and remove the directory if it is empty"""
-    unlink(f)
+    try:
+        unlink(f)
+    except OSError, e:
+        if not (ignoremissing and e.errno == errno.ENOENT):
+            raise
     # try removing directories that might now be empty
     try:
         _removedirs(os.path.dirname(f))
@@ -327,3 +337,11 @@ def lookupreg(key, valname=None, scope=None):
             pass
 
 expandglobs = True
+
+def statislink(st):
+    '''check whether a stat result is a symlink'''
+    return False
+
+def statisexec(st):
+    '''check whether a stat result is an executable file'''
+    return False

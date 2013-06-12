@@ -6,13 +6,6 @@
   > histedit=
   > EOF
 
-  $ EDITED="$TESTTMP/editedhistory"
-  $ cat > $EDITED <<EOF
-  > pick 177f92b77385 c
-  > pick e860deea161a e
-  > pick 652413bf663e f
-  > pick 055a42cdd887 d
-  > EOF
   $ initrepo ()
   > {
   >     hg init r
@@ -79,6 +72,15 @@ show the edit commands offered
   0 files updated, 0 files merged, 0 files removed, 0 files unresolved
 
 edit the history
+(use a hacky editor to check histedit-last-edit.txt backup)
+
+  $ EDITED="$TESTTMP/editedhistory"
+  $ cat > $EDITED <<EOF
+  > pick 177f92b77385 c
+  > pick e860deea161a e
+  > pick 652413bf663e f
+  > pick 055a42cdd887 d
+  > EOF
   $ HGEDITOR="cat \"$EDITED\" > " hg histedit 177f92b77385 2>&1 | fixbundle
   0 files updated, 0 files merged, 3 files removed, 0 files unresolved
   0 files updated, 0 files merged, 0 files removed, 0 files unresolved
@@ -94,18 +96,18 @@ rules should end up in .hg/histedit-last-edit.txt:
 
 log after edit
   $ hg log --graph
-  @  changeset:   5:853c68da763f
+  @  changeset:   5:07114f51870f
   |  tag:         tip
   |  user:        test
   |  date:        Thu Jan 01 00:00:00 1970 +0000
   |  summary:     d
   |
-  o  changeset:   4:26f6a030ae82
+  o  changeset:   4:8ade9693061e
   |  user:        test
   |  date:        Thu Jan 01 00:00:00 1970 +0000
   |  summary:     f
   |
-  o  changeset:   3:b069cc29fb22
+  o  changeset:   3:d8249471110a
   |  user:        test
   |  date:        Thu Jan 01 00:00:00 1970 +0000
   |  summary:     e
@@ -128,31 +130,30 @@ log after edit
 
 put things back
 
-  $ cat > $EDITED <<EOF
+  $ hg histedit 177f92b77385 --commands - 2>&1 << EOF | fixbundle
   > pick 177f92b77385 c
-  > pick 853c68da763f d
-  > pick b069cc29fb22 e
-  > pick 26f6a030ae82 f
+  > pick 07114f51870f d
+  > pick d8249471110a e
+  > pick 8ade9693061e f
   > EOF
-  $ HGEDITOR="cat \"$EDITED\" > " hg histedit 177f92b77385 2>&1 | fixbundle
   0 files updated, 0 files merged, 3 files removed, 0 files unresolved
   0 files updated, 0 files merged, 0 files removed, 0 files unresolved
   0 files updated, 0 files merged, 0 files removed, 0 files unresolved
   0 files updated, 0 files merged, 0 files removed, 0 files unresolved
 
   $ hg log --graph
-  @  changeset:   5:652413bf663e
+  @  changeset:   5:7eca9b5b1148
   |  tag:         tip
   |  user:        test
   |  date:        Thu Jan 01 00:00:00 1970 +0000
   |  summary:     f
   |
-  o  changeset:   4:e860deea161a
+  o  changeset:   4:915da888f2de
   |  user:        test
   |  date:        Thu Jan 01 00:00:00 1970 +0000
   |  summary:     e
   |
-  o  changeset:   3:055a42cdd887
+  o  changeset:   3:10517e47bbbb
   |  user:        test
   |  date:        Thu Jan 01 00:00:00 1970 +0000
   |  summary:     d
@@ -175,36 +176,35 @@ put things back
 
 slightly different this time
 
-  $ cat > $EDITED <<EOF
-  > pick 055a42cdd887 d
-  > pick 652413bf663e f
-  > pick e860deea161a e
+  $ hg histedit 177f92b77385 --commands - << EOF 2>&1 | fixbundle
+  > pick 10517e47bbbb d
+  > pick 7eca9b5b1148 f
+  > pick 915da888f2de e
   > pick 177f92b77385 c
   > EOF
-  $ HGEDITOR="cat \"$EDITED\" > " hg histedit 177f92b77385 2>&1 | fixbundle
   0 files updated, 0 files merged, 4 files removed, 0 files unresolved
   0 files updated, 0 files merged, 0 files removed, 0 files unresolved
   0 files updated, 0 files merged, 0 files removed, 0 files unresolved
   0 files updated, 0 files merged, 0 files removed, 0 files unresolved
   0 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ hg log --graph
-  @  changeset:   5:99a62755c625
+  @  changeset:   5:38b92f448761
   |  tag:         tip
   |  user:        test
   |  date:        Thu Jan 01 00:00:00 1970 +0000
   |  summary:     c
   |
-  o  changeset:   4:7c6fdd608667
+  o  changeset:   4:de71b079d9ce
   |  user:        test
   |  date:        Thu Jan 01 00:00:00 1970 +0000
   |  summary:     e
   |
-  o  changeset:   3:c4f52e213402
+  o  changeset:   3:be9ae3a309c6
   |  user:        test
   |  date:        Thu Jan 01 00:00:00 1970 +0000
   |  summary:     f
   |
-  o  changeset:   2:bfe4a5a76b37
+  o  changeset:   2:799205341b6b
   |  user:        test
   |  date:        Thu Jan 01 00:00:00 1970 +0000
   |  summary:     d
@@ -221,49 +221,44 @@ slightly different this time
   
 
 keep prevents stripping dead revs
-  $ cat > $EDITED <<EOF
-  > pick bfe4a5a76b37 d
-  > pick c4f52e213402 f
-  > pick 99a62755c625 c
-  > pick 7c6fdd608667 e
+  $ hg histedit 799205341b6b --keep --commands - 2>&1 << EOF | fixbundle
+  > pick 799205341b6b d
+  > pick be9ae3a309c6 f
+  > pick 38b92f448761 c
+  > pick de71b079d9ce e
   > EOF
-  $ HGEDITOR="cat \"$EDITED\" > " hg histedit bfe4a5a76b37 --keep 2>&1 | fixbundle
   0 files updated, 0 files merged, 2 files removed, 0 files unresolved
   0 files updated, 0 files merged, 0 files removed, 0 files unresolved
   0 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ hg log --graph
-  > cat > $EDITED <<EOF
-  > pick 7c6fdd608667 e
-  > pick 99a62755c625 c
-  > EOF
-  @  changeset:   7:99e266581538
+  @  changeset:   7:803ef1c6fcfd
   |  tag:         tip
   |  user:        test
   |  date:        Thu Jan 01 00:00:00 1970 +0000
   |  summary:     e
   |
-  o  changeset:   6:5ad36efb0653
-  |  parent:      3:c4f52e213402
+  o  changeset:   6:ece0b8d93dda
+  |  parent:      3:be9ae3a309c6
   |  user:        test
   |  date:        Thu Jan 01 00:00:00 1970 +0000
   |  summary:     c
   |
-  | o  changeset:   5:99a62755c625
+  | o  changeset:   5:38b92f448761
   | |  user:        test
   | |  date:        Thu Jan 01 00:00:00 1970 +0000
   | |  summary:     c
   | |
-  | o  changeset:   4:7c6fdd608667
+  | o  changeset:   4:de71b079d9ce
   |/   user:        test
   |    date:        Thu Jan 01 00:00:00 1970 +0000
   |    summary:     e
   |
-  o  changeset:   3:c4f52e213402
+  o  changeset:   3:be9ae3a309c6
   |  user:        test
   |  date:        Thu Jan 01 00:00:00 1970 +0000
   |  summary:     f
   |
-  o  changeset:   2:bfe4a5a76b37
+  o  changeset:   2:799205341b6b
   |  user:        test
   |  date:        Thu Jan 01 00:00:00 1970 +0000
   |  summary:     d
@@ -280,37 +275,40 @@ keep prevents stripping dead revs
   
 
 try with --rev
-  $ hg histedit --commands "$EDITED" --rev -2 2>&1 | fixbundle
+  $ hg histedit --commands - --rev -2 2>&1 <<EOF | fixbundle
+  > pick de71b079d9ce e
+  > pick 38b92f448761 c
+  > EOF
   abort: may not use changesets other than the ones listed
   $ hg log --graph
-  @  changeset:   7:99e266581538
+  @  changeset:   7:803ef1c6fcfd
   |  tag:         tip
   |  user:        test
   |  date:        Thu Jan 01 00:00:00 1970 +0000
   |  summary:     e
   |
-  o  changeset:   6:5ad36efb0653
-  |  parent:      3:c4f52e213402
+  o  changeset:   6:ece0b8d93dda
+  |  parent:      3:be9ae3a309c6
   |  user:        test
   |  date:        Thu Jan 01 00:00:00 1970 +0000
   |  summary:     c
   |
-  | o  changeset:   5:99a62755c625
+  | o  changeset:   5:38b92f448761
   | |  user:        test
   | |  date:        Thu Jan 01 00:00:00 1970 +0000
   | |  summary:     c
   | |
-  | o  changeset:   4:7c6fdd608667
+  | o  changeset:   4:de71b079d9ce
   |/   user:        test
   |    date:        Thu Jan 01 00:00:00 1970 +0000
   |    summary:     e
   |
-  o  changeset:   3:c4f52e213402
+  o  changeset:   3:be9ae3a309c6
   |  user:        test
   |  date:        Thu Jan 01 00:00:00 1970 +0000
   |  summary:     f
   |
-  o  changeset:   2:bfe4a5a76b37
+  o  changeset:   2:799205341b6b
   |  user:        test
   |  date:        Thu Jan 01 00:00:00 1970 +0000
   |  summary:     d

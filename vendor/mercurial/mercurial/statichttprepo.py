@@ -10,7 +10,7 @@
 from i18n import _
 import changelog, byterange, url, error
 import localrepo, manifest, util, scmutil, store
-import urllib, urllib2, errno
+import urllib, urllib2, errno, os
 
 class httprangereader(object):
     def __init__(self, url, opener):
@@ -64,7 +64,7 @@ def build_opener(ui, authinfo):
     urlopener = url.opener(ui, authinfo)
     urlopener.add_handler(byterange.HTTPRangeHandler())
 
-    class statichttpopener(scmutil.abstractopener):
+    class statichttpvfs(scmutil.abstractvfs):
         def __init__(self, base):
             self.base = base
 
@@ -74,7 +74,13 @@ def build_opener(ui, authinfo):
             f = "/".join((self.base, urllib.quote(path)))
             return httprangereader(f, urlopener)
 
-    return statichttpopener
+        def join(self, path):
+            if path:
+                return os.path.join(self.base, path)
+            else:
+                return self.base
+
+    return statichttpvfs
 
 class statichttppeer(localrepo.localpeer):
     def local(self):
@@ -128,8 +134,7 @@ class statichttprepository(localrepo.localrepository):
         self.changelog = changelog.changelog(self.sopener)
         self._tags = None
         self.nodetagscache = None
-        self._branchcache = None
-        self._branchcachetip = None
+        self._branchcaches = {}
         self.encodepats = None
         self.decodepats = None
 

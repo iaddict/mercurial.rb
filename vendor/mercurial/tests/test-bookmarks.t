@@ -40,9 +40,9 @@ look up bookmark
   summary:     0
   
 
-second bookmark for rev 0
+second bookmark for rev 0, command should work even with ui.strict on
 
-  $ hg bookmark X2
+  $ hg --config ui.strict=1 bookmark X2
 
 bookmark rev -1 again
 
@@ -154,6 +154,20 @@ list bookmarks
    * Y                         2:db815d6d32e6
      Z                         0:f7b1eb17ad24
 
+bookmarks from a revset
+  $ hg bookmark -r '.^1' REVSET
+  $ hg bookmark -r ':tip' TIP
+  $ hg up -q TIP
+  $ hg bookmarks
+     REVSET                    0:f7b1eb17ad24
+   * TIP                       2:db815d6d32e6
+     X2                        1:925d80f479bb
+     Y                         2:db815d6d32e6
+     Z                         0:f7b1eb17ad24
+
+  $ hg bookmark -d REVSET
+  $ hg bookmark -d TIP
+
 rename without new name
 
   $ hg bookmark -m Y
@@ -201,18 +215,86 @@ reject bookmark name with newline
 
   $ hg bookmark '
   > '
-  abort: bookmark name cannot contain newlines
+  abort: bookmark names cannot consist entirely of whitespace
   [255]
+
+  $ hg bookmark -m Z '
+  > '
+  abort: bookmark names cannot consist entirely of whitespace
+  [255]
+
+bookmark with reserved name
+
+  $ hg bookmark tip
+  abort: the name 'tip' is reserved
+  [255]
+
+  $ hg bookmark .
+  abort: the name '.' is reserved
+  [255]
+
+  $ hg bookmark null
+  abort: the name 'null' is reserved
+  [255]
+
 
 bookmark with existing name
 
-  $ hg bookmark Z
+  $ hg bookmark X2
+  abort: bookmark 'X2' already exists (use -f to force)
+  [255]
+
+  $ hg bookmark -m Y Z
   abort: bookmark 'Z' already exists (use -f to force)
+  [255]
+
+bookmark with name of branch
+
+  $ hg bookmark default
+  abort: a bookmark cannot have the name of an existing branch
+  [255]
+
+  $ hg bookmark -m Y default
+  abort: a bookmark cannot have the name of an existing branch
+  [255]
+
+bookmark with integer name
+
+  $ hg bookmark 10
+  abort: cannot use an integer as a name
+  [255]
+
+incompatible options
+
+  $ hg bookmark -m Y -d Z
+  abort: --delete and --rename are incompatible
+  [255]
+
+  $ hg bookmark -r 1 -d Z
+  abort: --rev is incompatible with --delete
+  [255]
+
+  $ hg bookmark -r 1 -m Z Y
+  abort: --rev is incompatible with --rename
   [255]
 
 force bookmark with existing name
 
-  $ hg bookmark -f Z
+  $ hg bookmark -f X2
+
+force bookmark back to where it was, should deactivate it
+
+  $ hg bookmark -fr1 X2
+  $ hg bookmarks
+     X2                        1:925d80f479bb
+     Y                         2:db815d6d32e6
+     Z                         0:f7b1eb17ad24
+     x  y                      2:db815d6d32e6
+
+forward bookmark to descendant without --force
+
+  $ hg bookmark Z
+  moving bookmark 'Z' forward from f7b1eb17ad24
 
 list bookmarks
 
@@ -234,10 +316,19 @@ bookmark name with whitespace only
   abort: bookmark names cannot consist entirely of whitespace
   [255]
 
+  $ hg bookmark -m Y ' '
+  abort: bookmark names cannot consist entirely of whitespace
+  [255]
+
 invalid bookmark
 
   $ hg bookmark 'foo:bar'
-  abort: bookmark 'foo:bar' contains illegal character
+  abort: ':' cannot be used in a name
+  [255]
+
+  $ hg bookmark 'foo
+  > bar'
+  abort: '\n' cannot be used in a name
   [255]
 
 the bookmark extension should be ignored now that it is part of core
@@ -278,8 +369,13 @@ test rollback
   $ hg bookmarks
      X2                        1:925d80f479bb
      Y                         2:db815d6d32e6
-   * Z                         2:db815d6d32e6
+     Z                         2:db815d6d32e6
      x  y                      2:db815d6d32e6
+
+activate bookmark on working dir parent without --force
+
+  $ hg bookmark --inactive Z
+  $ hg bookmark Z
 
 test clone
 
@@ -293,10 +389,10 @@ test clone
      a@                        2:db815d6d32e6
      x  y                      2:db815d6d32e6
   $ hg clone . cloned-bookmarks
-  updating to branch default
+  updating to bookmark @
   2 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ hg -R cloned-bookmarks bookmarks
-     @                         2:db815d6d32e6
+   * @                         2:db815d6d32e6
      X2                        1:925d80f479bb
      Y                         2:db815d6d32e6
      Z                         2:db815d6d32e6
@@ -311,10 +407,10 @@ test clone with pull protocol
   adding manifests
   adding file changes
   added 3 changesets with 3 changes to 3 files (+1 heads)
-  updating to branch default
+  updating to bookmark @
   2 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ hg -R cloned-bookmarks-pull bookmarks
-     @                         2:db815d6d32e6
+   * @                         2:db815d6d32e6
      X2                        1:925d80f479bb
      Y                         2:db815d6d32e6
      Z                         2:db815d6d32e6
@@ -323,6 +419,22 @@ test clone with pull protocol
 
   $ hg bookmark -d @
   $ hg bookmark -d a@
+
+test clone with a bookmark named "default" (issue3677)
+
+  $ hg bookmark -r 1 -f -i default
+  $ hg clone . cloned-bookmark-default
+  updating to branch default
+  2 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  $ hg -R cloned-bookmark-default bookmarks
+     X2                        1:925d80f479bb
+     Y                         2:db815d6d32e6
+     Z                         2:db815d6d32e6
+     default                   1:925d80f479bb
+     x  y                      2:db815d6d32e6
+  $ hg -R cloned-bookmark-default parents -q
+  2:db815d6d32e6
+  $ hg bookmark -d default
 
 test clone with a specific revision
 
@@ -335,6 +447,17 @@ test clone with a specific revision
   2 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ hg -R cloned-bookmarks-rev bookmarks
      X2                        1:925d80f479bb
+
+test clone with update to a bookmark
+
+  $ hg clone -u Z . cloned-bookmarks-update
+  updating to branch default
+  2 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  $ hg -R cloned-bookmarks-update bookmarks
+     X2                        1:925d80f479bb
+     Y                         2:db815d6d32e6
+   * Z                         2:db815d6d32e6
+     x  y                      2:db815d6d32e6
 
 create bundle with two heads
 
@@ -361,7 +484,18 @@ create bundle with two heads
   adding file changes
   added 2 changesets with 2 changes to 2 files (+1 heads)
   (run 'hg heads' to see heads, 'hg merge' to merge)
+
+update to current bookmark if it's not the parent
+
+  $ hg summary
+  parent: 2:db815d6d32e6 
+   2
+  branch: default
+  bookmarks: [Z] Y x  y
+  commit: 1 added, 1 unknown (new branch head)
+  update: 2 new changesets (update)
   $ hg update
+  updating to active bookmark Z
   1 files updated, 0 files merged, 0 files removed, 0 files unresolved
   $ hg bookmarks
      X2                        1:925d80f479bb
@@ -457,3 +591,40 @@ tipmost surviving ancestor of the stripped revision.
      date:        Thu Jan 01 00:00:00 1970 +0000
      summary:     0
   
+
+test clearing divergent bookmarks of linear ancestors
+
+  $ hg bookmark Z -r 0
+  $ hg bookmark Z@1 -r 1
+  $ hg bookmark Z@2 -r 2
+  $ hg bookmark Z@3 -r 3
+  $ hg book
+     Z                         0:f7b1eb17ad24
+     Z@1                       1:925d80f479bb
+     Z@2                       2:db815d6d32e6
+     Z@3                       3:9ba5f110a0b3
+   * four                      3:9ba5f110a0b3
+     should-end-on-two         2:db815d6d32e6
+  $ hg bookmark Z
+  moving bookmark 'Z' forward from f7b1eb17ad24
+  $ hg book
+   * Z                         3:9ba5f110a0b3
+     Z@1                       1:925d80f479bb
+     four                      3:9ba5f110a0b3
+     should-end-on-two         2:db815d6d32e6
+
+test clearing only a single divergent bookmark across branches
+
+  $ hg book foo -r 1
+  $ hg book foo@1 -r 0
+  $ hg book foo@2 -r 2
+  $ hg book foo@3 -r 3
+  $ hg book foo -r foo@3
+  $ hg book
+   * Z                         3:9ba5f110a0b3
+     Z@1                       1:925d80f479bb
+     foo                       3:9ba5f110a0b3
+     foo@1                     0:f7b1eb17ad24
+     foo@2                     2:db815d6d32e6
+     four                      3:9ba5f110a0b3
+     should-end-on-two         2:db815d6d32e6

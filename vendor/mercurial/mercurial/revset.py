@@ -8,10 +8,11 @@
 import re
 import parser, util, error, discovery, hbisect, phases
 import node
-import bookmarks as bookmarksmod
 import match as matchmod
 from i18n import _
 import encoding
+import obsolete as obsmod
+import repoview
 
 def _revancestors(repo, revs, followfirst):
     """Like revlog.ancestors(), but supports followfirst."""
@@ -40,7 +41,7 @@ def _revdescendants(repo, revs, followfirst):
         return
 
     seen = set(revs)
-    for i in xrange(first + 1, len(cl)):
+    for i in cl.revs(first + 1):
         for x in cl.parentrevs(i)[:cut]:
             if x != nullrev and x in seen:
                 seen.add(i)
@@ -104,6 +105,15 @@ elements = {
 keywords = set(['and', 'or', 'not'])
 
 def tokenize(program):
+    '''
+    Parse a revset statement into a stream of tokens
+
+    Check that @ is a valid unquoted token character (issue3686):
+    >>> list(tokenize("@::"))
+    [('symbol', '@', 0), ('::', None, 1), ('end', None, 3)]
+
+    '''
+
     pos, l = 0, len(program)
     while pos < l:
         c = program[pos]
@@ -139,12 +149,12 @@ def tokenize(program):
             else:
                 raise error.ParseError(_("unterminated string"), s)
         # gather up a symbol/keyword
-        elif c.isalnum() or c in '._' or ord(c) > 127:
+        elif c.isalnum() or c in '._@' or ord(c) > 127:
             s = pos
             pos += 1
             while pos < l: # find end of symbol
                 d = program[pos]
-                if not (d.isalnum() or d in "._/" or ord(d) > 127):
+                if not (d.isalnum() or d in "._/@" or ord(d) > 127):
                     break
                 if d == '.' and program[pos - 1] == '.': # special case for ..
                     pos -= 1
@@ -212,13 +222,9 @@ def symbolset(repo, subset, x):
     return stringset(repo, subset, x)
 
 def rangeset(repo, subset, x, y):
-    m = getset(repo, subset, x)
-    if not m:
-        m = getset(repo, range(len(repo)), x)
-
-    n = getset(repo, subset, y)
-    if not n:
-        n = getset(repo, range(len(repo)), y)
+    cl = repo.changelog
+    m = getset(repo, cl, x)
+    n = getset(repo, cl, y)
 
     if not m or not n:
         return []
@@ -232,12 +238,10 @@ def rangeset(repo, subset, x, y):
     return [x for x in r if x in s]
 
 def dagrange(repo, subset, x, y):
-    if subset:
-        r = range(len(repo))
-        xs = _revsbetween(repo, getset(repo, r, x), getset(repo, r, y))
-        s = set(subset)
-        return [r for r in xs if r in s]
-    return []
+    r = list(repo)
+    xs = _revsbetween(repo, getset(repo, r, x), getset(repo, r, y))
+    s = set(subset)
+    return [r for r in xs if r in s]
 
 def andset(repo, subset, x, y):
     return getset(repo, getset(repo, subset, x), y)
@@ -271,23 +275,35 @@ def adds(repo, subset, x):
     return checkstatus(repo, subset, pat, 1)
 
 def ancestor(repo, subset, x):
-    """``ancestor(single, single)``
-    Greatest common ancestor of the two changesets.
+    """``ancestor(*changeset)``
+    Greatest common ancestor of the changesets.
+
+    Accepts 0 or more changesets.
+    Will return empty list when passed no args.
+    Greatest common ancestor of a single changeset is that changeset.
     """
     # i18n: "ancestor" is a keyword
-    l = getargs(x, 2, 2, _("ancestor requires two arguments"))
-    r = range(len(repo))
-    a = getset(repo, r, l[0])
-    b = getset(repo, r, l[1])
-    if len(a) != 1 or len(b) != 1:
-        # i18n: "ancestor" is a keyword
-        raise error.ParseError(_("ancestor arguments must be single revisions"))
-    an = [repo[a[0]].ancestor(repo[b[0]]).rev()]
+    l = getlist(x)
+    rl = list(repo)
+    anc = None
 
-    return [r for r in an if r in subset]
+    # (getset(repo, rl, i) for i in l) generates a list of lists
+    rev = repo.changelog.rev
+    ancestor = repo.changelog.ancestor
+    node = repo.changelog.node
+    for revs in (getset(repo, rl, i) for i in l):
+        for r in revs:
+            if anc is None:
+                anc = r
+            else:
+                anc = rev(ancestor(node(anc), node(r)))
+
+    if anc is not None and anc in subset:
+        return [anc]
+    return []
 
 def _ancestors(repo, subset, x, followfirst=False):
-    args = getset(repo, range(len(repo)), x)
+    args = getset(repo, list(repo), x)
     if not args:
         return []
     s = set(_revancestors(repo, args, followfirst)) | set(args)
@@ -315,7 +331,7 @@ def ancestorspec(repo, subset, x, n):
         raise error.ParseError(_("~ expects a number"))
     ps = set()
     cl = repo.changelog
-    for r in getset(repo, subset, x):
+    for r in getset(repo, cl, x):
         for i in range(n):
             r = cl.parentrevs(r)[0]
         ps.add(r)
@@ -335,7 +351,7 @@ def bisect(repo, subset, x):
     Changesets marked in the specified bisect status:
 
     - ``good``, ``bad``, ``skip``: csets explicitly marked as good/bad/skip
-    - ``goods``, ``bads``      : csets topologicaly good/bad
+    - ``goods``, ``bads``      : csets topologically good/bad
     - ``range``              : csets taking part in the bisection
     - ``pruned``             : csets that are goods, bads or skipped
     - ``untested``           : csets whose fate is yet unknown
@@ -368,14 +384,14 @@ def bookmark(repo, subset, x):
                        _('the argument to bookmark must be a string'))
         kind, pattern, matcher = _stringmatcher(bm)
         if kind == 'literal':
-            bmrev = bookmarksmod.listbookmarks(repo).get(bm, None)
+            bmrev = repo._bookmarks.get(bm, None)
             if not bmrev:
                 raise util.Abort(_("bookmark '%s' does not exist") % bm)
             bmrev = repo[bmrev].rev()
             return [r for r in subset if r == bmrev]
         else:
             matchrevs = set()
-            for name, bmrev in bookmarksmod.listbookmarks(repo).iteritems():
+            for name, bmrev in repo._bookmarks.iteritems():
                 if matcher(name):
                     matchrevs.add(bmrev)
             if not matchrevs:
@@ -387,7 +403,7 @@ def bookmark(repo, subset, x):
             return [r for r in subset if r in bmrevs]
 
     bms = set([repo[r].rev()
-               for r in bookmarksmod.listbookmarks(repo).values()])
+               for r in repo._bookmarks.values()])
     return [r for r in subset if r in bms]
 
 def branch(repo, subset, x):
@@ -414,12 +430,35 @@ def branch(repo, subset, x):
         else:
             return [r for r in subset if matcher(repo[r].branch())]
 
-    s = getset(repo, range(len(repo)), x)
+    s = getset(repo, list(repo), x)
     b = set()
     for r in s:
         b.add(repo[r].branch())
     s = set(s)
     return [r for r in subset if r in s or repo[r].branch() in b]
+
+def bumped(repo, subset, x):
+    """``bumped()``
+    Mutable changesets marked as successors of public changesets.
+
+    Only non-public and non-obsolete changesets can be `bumped`.
+    """
+    # i18n: "bumped" is a keyword
+    getargs(x, 0, 0, _("bumped takes no arguments"))
+    bumped = obsmod.getrevs(repo, 'bumped')
+    return [r for r in subset if r in bumped]
+
+def bundle(repo, subset, x):
+    """``bundle()``
+    Changesets in the bundle.
+
+    Bundle must be specified by the -R option."""
+
+    try:
+        bundlerevs = repo.changelog.bundlerevs
+    except AttributeError:
+        raise util.Abort(_("no bundle provided - specify with -R"))
+    return [r for r in subset if r in bundlerevs]
 
 def checkstatus(repo, subset, pat, field):
     m = None
@@ -454,8 +493,13 @@ def checkstatus(repo, subset, pat, field):
 
 def _children(repo, narrow, parentset):
     cs = set()
+    if not parentset:
+        return cs
     pr = repo.changelog.parentrevs
+    minrev = min(parentset)
     for r in narrow:
+        if r <= minrev:
+            continue
         for p in pr(r):
             if p in parentset:
                 cs.add(r)
@@ -465,7 +509,7 @@ def children(repo, subset, x):
     """``children(set)``
     Child changesets of changesets in set.
     """
-    s = set(getset(repo, range(len(repo)), x))
+    s = set(getset(repo, list(repo), x))
     cs = _children(repo, subset, s)
     return [r for r in subset if r in cs]
 
@@ -546,7 +590,7 @@ def desc(repo, subset, x):
     return l
 
 def _descendants(repo, subset, x, followfirst=False):
-    args = getset(repo, range(len(repo)), x)
+    args = getset(repo, list(repo), x)
     if not args:
         return []
     s = set(_revdescendants(repo, args, followfirst)) | set(args)
@@ -570,9 +614,9 @@ def destination(repo, subset, x):
     is the same as passing all().
     """
     if x is not None:
-        args = set(getset(repo, range(len(repo)), x))
+        args = set(getset(repo, list(repo), x))
     else:
-        args = set(getall(repo, range(len(repo)), x))
+        args = set(getall(repo, list(repo), x))
 
     dests = set()
 
@@ -594,7 +638,7 @@ def destination(repo, subset, x):
 
             # The visited lineage is a match if the current source is in the arg
             # set.  Since every candidate dest is visited by way of iterating
-            # subset, any dests futher back in the lineage will be tested by a
+            # subset, any dests further back in the lineage will be tested by a
             # different iteration over subset.  Likewise, if the src was already
             # selected, the current lineage can be selected without going back
             # further.
@@ -606,6 +650,15 @@ def destination(repo, subset, x):
             src = _getrevsource(repo, r)
 
     return [r for r in subset if r in dests]
+
+def divergent(repo, subset, x):
+    """``divergent()``
+    Final successors of changesets with an alternative set of final successors.
+    """
+    # i18n: "divergent" is a keyword
+    getargs(x, 0, 0, _("divergent takes no arguments"))
+    divergent = obsmod.getrevs(repo, 'divergent')
+    return [r for r in subset if r in divergent]
 
 def draft(repo, subset, x):
     """``draft()``
@@ -621,8 +674,8 @@ def extinct(repo, subset, x):
     """
     # i18n: "extinct" is a keyword
     getargs(x, 0, 0, _("extinct takes no arguments"))
-    extinctset = set(repo.revs('(obsolete()::) - (::(not obsolete()))'))
-    return [r for r in subset if r in extinctset]
+    extincts = obsmod.getrevs(repo, 'extinct')
+    return [r for r in subset if r in extincts]
 
 def extra(repo, subset, x):
     """``extra(label, [value])``
@@ -838,6 +891,15 @@ def heads(repo, subset, x):
     ps = set(parents(repo, subset, x))
     return [r for r in s if r not in ps]
 
+def hidden(repo, subset, x):
+    """``hidden()``
+    Hidden changesets.
+    """
+    # i18n: "hidden" is a keyword
+    getargs(x, 0, 0, _("hidden takes no arguments"))
+    hiddenrevs = repoview.filterrevs(repo, 'visible')
+    return [r for r in subset if r in hiddenrevs]
+
 def keyword(repo, subset, x):
     """``keyword(string)``
     Search commit message, user name, and names of changed files for
@@ -868,7 +930,7 @@ def limit(repo, subset, x):
         # i18n: "limit" is a keyword
         raise error.ParseError(_("limit expects a number"))
     ss = set(subset)
-    os = getset(repo, range(len(repo)), l[0])[:lim]
+    os = getset(repo, list(repo), l[0])[:lim]
     return [r for r in os if r in ss]
 
 def last(repo, subset, x):
@@ -886,14 +948,14 @@ def last(repo, subset, x):
         # i18n: "last" is a keyword
         raise error.ParseError(_("last expects a number"))
     ss = set(subset)
-    os = getset(repo, range(len(repo)), l[0])[-lim:]
+    os = getset(repo, list(repo), l[0])[-lim:]
     return [r for r in os if r in ss]
 
 def maxrev(repo, subset, x):
     """``max(set)``
     Changeset with highest revision number in set.
     """
-    os = getset(repo, range(len(repo)), x)
+    os = getset(repo, list(repo), x)
     if os:
         m = max(os)
         if m in subset:
@@ -909,11 +971,28 @@ def merge(repo, subset, x):
     cl = repo.changelog
     return [r for r in subset if cl.parentrevs(r)[1] != -1]
 
+def branchpoint(repo, subset, x):
+    """``branchpoint()``
+    Changesets with more than one child.
+    """
+    # i18n: "branchpoint" is a keyword
+    getargs(x, 0, 0, _("branchpoint takes no arguments"))
+    cl = repo.changelog
+    if not subset:
+        return []
+    baserev = min(subset)
+    parentscount = [0]*(len(repo) - baserev)
+    for r in cl.revs(start=baserev + 1):
+        for p in cl.parentrevs(r):
+            if p >= baserev:
+                parentscount[p - baserev] += 1
+    return [r for r in subset if (parentscount[r - baserev] > 1)]
+
 def minrev(repo, subset, x):
     """``min(set)``
     Changeset with lowest revision number in set.
     """
-    os = getset(repo, range(len(repo)), x)
+    os = getset(repo, list(repo), x)
     if os:
         m = min(os)
         if m in subset:
@@ -951,7 +1030,8 @@ def obsolete(repo, subset, x):
     Mutable changeset with a newer version."""
     # i18n: "obsolete" is a keyword
     getargs(x, 0, 0, _("obsolete takes no arguments"))
-    return [r for r in subset if repo[r].obsolete()]
+    obsoletes = obsmod.getrevs(repo, 'obsolete')
+    return [r for r in subset if r in obsoletes]
 
 def origin(repo, subset, x):
     """``origin([set])``
@@ -962,9 +1042,9 @@ def origin(repo, subset, x):
     for the first operation is selected.
     """
     if x is not None:
-        args = set(getset(repo, range(len(repo)), x))
+        args = set(getset(repo, list(repo), x))
     else:
-        args = set(getall(repo, range(len(repo)), x))
+        args = set(getall(repo, list(repo), x))
 
     def _firstsrc(rev):
         src = _getrevsource(repo, rev)
@@ -1014,7 +1094,7 @@ def p1(repo, subset, x):
 
     ps = set()
     cl = repo.changelog
-    for r in getset(repo, range(len(repo)), x):
+    for r in getset(repo, list(repo), x):
         ps.add(cl.parentrevs(r)[0])
     return [r for r in subset if r in ps]
 
@@ -1032,7 +1112,7 @@ def p2(repo, subset, x):
 
     ps = set()
     cl = repo.changelog
-    for r in getset(repo, range(len(repo)), x):
+    for r in getset(repo, list(repo), x):
         ps.add(cl.parentrevs(r)[1])
     return [r for r in subset if r in ps]
 
@@ -1046,7 +1126,7 @@ def parents(repo, subset, x):
 
     ps = set()
     cl = repo.changelog
-    for r in getset(repo, range(len(repo)), x):
+    for r in getset(repo, list(repo), x):
         ps.update(cl.parentrevs(r))
     return [r for r in subset if r in ps]
 
@@ -1064,7 +1144,7 @@ def parentspec(repo, subset, x, n):
         raise error.ParseError(_("^ expects a number 0, 1, or 2"))
     ps = set()
     cl = repo.changelog
-    for r in getset(repo, subset, x):
+    for r in getset(repo, cl, x):
         if n == 0:
             ps.add(r)
         elif n == 1:
@@ -1182,7 +1262,7 @@ def matching(repo, subset, x):
     # i18n: "matching" is a keyword
     l = getargs(x, 1, 2, _("matching takes 1 or 2 arguments"))
 
-    revs = getset(repo, xrange(len(repo)), l[0])
+    revs = getset(repo, repo.changelog, l[0])
 
     fieldlist = ['metadata']
     if len(l) > 1:
@@ -1280,7 +1360,7 @@ def roots(repo, subset, x):
     """``roots(set)``
     Changesets in set with no parent changeset in set.
     """
-    s = set(getset(repo, xrange(len(repo)), x))
+    s = set(getset(repo, repo.changelog, x))
     subset = [r for r in subset if r in s]
     cs = _children(repo, subset, s)
     return [r for r in subset if r not in cs]
@@ -1414,8 +1494,6 @@ def tag(repo, subset, x):
             s = set([repo[tn].rev()])
         else:
             s = set([cl.rev(n) for t, n in repo.tagslist() if matcher(t)])
-            if not s:
-                raise util.Abort(_("no tags exist that match '%s'") % pattern)
     else:
         s = set([cl.rev(n) for t, n in repo.tagslist() if t != 'tip'])
     return [r for r in subset if r in s]
@@ -1429,8 +1507,8 @@ def unstable(repo, subset, x):
     """
     # i18n: "unstable" is a keyword
     getargs(x, 0, 0, _("unstable takes no arguments"))
-    unstableset = set(repo.revs('(obsolete()::) - obsolete()'))
-    return [r for r in subset if r in unstableset]
+    unstables = obsmod.getrevs(repo, 'unstable')
+    return [r for r in subset if r in unstables]
 
 
 def user(repo, subset, x):
@@ -1464,6 +1542,9 @@ symbols = {
     "bisected": bisected,
     "bookmark": bookmark,
     "branch": branch,
+    "branchpoint": branchpoint,
+    "bumped": bumped,
+    "bundle": bundle,
     "children": children,
     "closed": closed,
     "contains": contains,
@@ -1473,6 +1554,7 @@ symbols = {
     "descendants": descendants,
     "_firstdescendants": _firstdescendants,
     "destination": destination,
+    "divergent": divergent,
     "draft": draft,
     "extinct": extinct,
     "extra": extra,
@@ -1484,6 +1566,7 @@ symbols = {
     "grep": grep,
     "head": head,
     "heads": heads,
+    "hidden": hidden,
     "id": node_,
     "keyword": keyword,
     "last": last,

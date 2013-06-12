@@ -63,7 +63,7 @@ from mercurial.i18n import _
 from mercurial.node import bin, hex, short, nullid, nullrev
 from mercurial.lock import release
 from mercurial import commands, cmdutil, hg, scmutil, util, revset
-from mercurial import repair, extensions, url, error, phases
+from mercurial import repair, extensions, error, phases
 from mercurial import patch as patchmod
 import os, re, errno, shutil
 
@@ -275,13 +275,14 @@ def newcommit(repo, phase, *args, **kwargs):
     It should be used instead of repo.commit inside the mq source for operation
     creating new changeset.
     """
+    repo = repo.unfiltered()
     if phase is None:
         if repo.ui.configbool('mq', 'secret', False):
             phase = phases.secret
     if phase is not None:
         backup = repo.ui.backupconfig('phases', 'new-commit')
     # Marking the repository as committing an mq patch can be used
-    # to optimize operations like _branchtags().
+    # to optimize operations like branchtags().
     repo._committingpatch = True
     try:
         if phase is not None:
@@ -296,7 +297,7 @@ class AbortNoCleanup(error.Abort):
     pass
 
 class queue(object):
-    def __init__(self, ui, path, patchdir=None):
+    def __init__(self, ui, baseui, path, patchdir=None):
         self.basepath = path
         try:
             fh = open(os.path.join(path, 'patches.queue'))
@@ -311,6 +312,7 @@ class queue(object):
         self.path = patchdir or curpath
         self.opener = scmutil.opener(self.path)
         self.ui = ui
+        self.baseui = baseui
         self.applieddirty = False
         self.seriesdirty = False
         self.added = []
@@ -826,7 +828,11 @@ class queue(object):
             if r:
                 r[None].forget(patches)
             for p in patches:
-                os.unlink(self.join(p))
+                try:
+                    os.unlink(self.join(p))
+                except OSError, inst:
+                    if inst.errno != errno.ENOENT:
+                        raise
 
         qfinished = []
         if numrevs:
@@ -924,11 +930,11 @@ class queue(object):
         self._cleanup(realpatches, numrevs, opts.get('keep'))
 
     def checktoppatch(self, repo):
+        '''check that working directory is at qtip'''
         if self.applied:
             top = self.applied[-1].node
             patch = self.applied[-1].name
-            pp = repo.dirstate.parents()
-            if top not in pp:
+            if repo.dirstate.p1() != top:
                 raise util.Abort(_("working directory revision is not qtip"))
             return top, patch
         return None, None
@@ -942,7 +948,7 @@ class queue(object):
             bctx = repo[baserev]
         else:
             bctx = wctx.parents()[0]
-        for s in wctx.substate:
+        for s in sorted(wctx.substate):
             if wctx.sub(s).dirty(True):
                 raise util.Abort(
                     _("uncommitted changes in subrepository %s") % s)
@@ -1146,7 +1152,7 @@ class queue(object):
                 return matches[0]
             if self.series and self.applied:
                 if s == 'qtip':
-                    return self.series[self.seriesend(True)-1]
+                    return self.series[self.seriesend(True) - 1]
                 if s == 'qbase':
                     return self.series[0]
             return None
@@ -1324,11 +1330,7 @@ class queue(object):
                 # created while patching
                 for f in all_files:
                     if f not in repo.dirstate:
-                        try:
-                            util.unlinkpath(repo.wjoin(f))
-                        except OSError, inst:
-                            if inst.errno != errno.ENOENT:
-                                raise
+                        util.unlinkpath(repo.wjoin(f), ignoremissing=True)
                 self.ui.warn(_('done\n'))
                 raise
 
@@ -1405,8 +1407,6 @@ class queue(object):
             self.applieddirty = True
             end = len(self.applied)
             rev = self.applied[start].node
-            if update:
-                top = self.checktoppatch(repo)[0]
 
             try:
                 heads = repo.changelog.heads(rev)
@@ -1427,7 +1427,7 @@ class queue(object):
             if update:
                 qp = self.qparents(repo, rev)
                 ctx = repo[qp]
-                m, a, r, d = repo.status(qp, top)[:4]
+                m, a, r, d = repo.status(qp, '.')[:4]
                 if d:
                     raise util.Abort(_("deletions found between repo revs"))
 
@@ -1437,11 +1437,7 @@ class queue(object):
                 self.backup(repo, tobackup)
 
                 for f in a:
-                    try:
-                        util.unlinkpath(repo.wjoin(f))
-                    except OSError, e:
-                        if e.errno != errno.ENOENT:
-                            raise
+                    util.unlinkpath(repo.wjoin(f), ignoremissing=True)
                     repo.dirstate.drop(f)
                 for f in m + r:
                     fctx = ctx[f]
@@ -1522,7 +1518,7 @@ class queue(object):
             #
             # this should really read:
             #   mm, dd, aa = repo.status(top, patchparent)[:3]
-            # but we do it backwards to take advantage of manifest/chlog
+            # but we do it backwards to take advantage of manifest/changelog
             # caching against the next repo.status call
             mm, aa, dd = repo.status(patchparent, top)[:3]
             changes = repo.changelog.read(top)
@@ -1535,7 +1531,7 @@ class queue(object):
                 # if amending a patch, we start with existing
                 # files plus specified files - unfiltered
                 match = scmutil.matchfiles(repo, mm + aa + dd + matchfn.files())
-                # filter with inc/exl options
+                # filter with include/exclude options
                 matchfn = scmutil.match(repo[None], opts=opts)
             else:
                 match = scmutil.matchall(repo)
@@ -1575,8 +1571,19 @@ class queue(object):
             m = list(mm)
             r = list(dd)
             a = list(aa)
-            c = [filter(matchfn, l) for l in (m, a, r)]
-            match = scmutil.matchfiles(repo, set(c[0] + c[1] + c[2] + inclsubs))
+
+            # create 'match' that includes the files to be recommitted.
+            # apply matchfn via repo.status to ensure correct case handling.
+            cm, ca, cr, cd = repo.status(patchparent, match=matchfn)[:4]
+            allmatches = set(cm + ca + cr + cd)
+            refreshchanges = [x.intersection(allmatches) for x in (mm, aa, dd)]
+
+            files = set(inclsubs)
+            for x in refreshchanges:
+                files.update(x)
+            match = scmutil.matchfiles(repo, files)
+
+            bmlist = repo[top].bookmarks()
 
             try:
                 if diffopts.git or diffopts.upgrade:
@@ -1614,7 +1621,7 @@ class queue(object):
                 # if the patch excludes a modified file, mark that
                 # file with mtime=0 so status can see it.
                 mm = []
-                for i in xrange(len(m)-1, -1, -1):
+                for i in xrange(len(m) - 1, -1, -1):
                     if not matchfn(m[i]):
                         mm.append(m[i])
                         del m[i]
@@ -1655,6 +1662,7 @@ class queue(object):
                 n = newcommit(repo, oldphase, message, user, ph.date,
                               match=match, force=True)
                 # only write patch after a successful commit
+                c = [list(x) for x in refreshchanges]
                 if inclsubs:
                     self.putsubstate2changes(substatestate, c)
                 chunks = patchmod.diff(repo, patchparent,
@@ -1662,6 +1670,12 @@ class queue(object):
                 for chunk in chunks:
                     patchf.write(chunk)
                 patchf.close()
+
+                marks = repo._bookmarks
+                for bm in bmlist:
+                    marks[bm] = n
+                marks.write()
+
                 self.applied.append(statusentry(n, patchfn))
             except: # re-raises
                 ctx = repo[cparents[0]]
@@ -1761,9 +1775,7 @@ class queue(object):
             return True
 
     def qrepo(self, create=False):
-        ui = self.ui.copy()
-        ui.setconfig('paths', 'default', '', overlay=False)
-        ui.setconfig('paths', 'default-push', '', overlay=False)
+        ui = self.baseui.copy()
         if create or os.path.isdir(self.join(".hg")):
             return hg.repository(ui, path=self.path, create=create)
 
@@ -1998,7 +2010,7 @@ class queue(object):
                     if filename == '-':
                         text = self.ui.fin.read()
                     else:
-                        fp = url.open(self.ui, filename)
+                        fp = hg.openpath(self.ui, filename)
                         text = fp.read()
                         fp.close()
                 except (OSError, IOError):
@@ -2748,7 +2760,7 @@ def push(ui, repo, patch=None, **opts):
         if not newpath:
             ui.warn(_("no saved queues found, please use -n\n"))
             return 1
-        mergeq = queue(ui, repo.path, newpath)
+        mergeq = queue(ui, repo.baseui, repo.path, newpath)
         ui.warn(_("merging with queue at: %s\n") % mergeq.path)
     ret = q.push(repo, patch, force=opts.get('force'), list=opts.get('list'),
                  mergeq=mergeq, all=opts.get('all'), move=opts.get('move'),
@@ -2782,7 +2794,7 @@ def pop(ui, repo, patch=None, **opts):
     opts = fixkeepchangesopts(ui, opts)
     localupdate = True
     if opts.get('name'):
-        q = queue(ui, repo.path, repo.join(opts.get('name')))
+        q = queue(ui, repo.baseui, repo.path, repo.join(opts.get('name')))
         ui.warn(_('using patch queue: %s\n') % q.path)
         localupdate = False
     else:
@@ -2982,7 +2994,7 @@ def strip(ui, repo, *revs, **opts):
             revs.update(set(rsrevs))
         if not revs:
             del marks[mark]
-            repo._writebookmarks(mark)
+            marks.write()
             ui.write(_("bookmark '%s' deleted\n") % mark)
 
     if not revs:
@@ -3019,12 +3031,27 @@ def strip(ui, repo, *revs, **opts):
             del q.applied[start:end]
             q.savedirty()
 
-    revs = list(rootnodes)
+    revs = sorted(rootnodes)
     if update and opts.get('keep'):
         wlock = repo.wlock()
         try:
             urev = repo.mq.qparents(repo, revs[0])
-            repo.dirstate.rebuild(urev, repo[urev].manifest())
+            uctx = repo[urev]
+
+            # only reset the dirstate for files that would actually change
+            # between the working context and uctx
+            descendantrevs = repo.revs("%s::." % uctx.rev())
+            changedfiles = []
+            for rev in descendantrevs:
+                # blindly reset the files, regardless of what actually changed
+                changedfiles.extend(repo[rev].files())
+
+            # reset files that only changed in the dirstate too
+            dirstate = repo.dirstate
+            dirchanges = [f for f in dirstate if dirstate[f] != 'n']
+            changedfiles.extend(dirchanges)
+
+            repo.dirstate.rebuild(urev, uctx.manifest(), changedfiles)
             repo.dirstate.write()
             update = False
         finally:
@@ -3032,7 +3059,7 @@ def strip(ui, repo, *revs, **opts):
 
     if opts.get('bookmark'):
         del marks[mark]
-        repo._writebookmarks(marks)
+        marks.write()
         ui.write(_("bookmark '%s' deleted\n") % mark)
 
     repo.mq.strip(repo, revs, backup=backup, update=update,
@@ -3185,9 +3212,9 @@ def finish(ui, repo, *revrange, **opts):
     revs = scmutil.revrange(repo, revrange)
     if repo['.'].rev() in revs and repo[None].files():
         ui.warn(_('warning: uncommitted changes in the working directory\n'))
-    # queue.finish may changes phases but leave the responsability to lock the
+    # queue.finish may changes phases but leave the responsibility to lock the
     # repo to the caller to avoid deadlock with wlock. This command code is
-    # responsability for this locking.
+    # responsibility for this locking.
     lock = repo.lock()
     try:
         q.finish(repo, revs)
@@ -3262,7 +3289,8 @@ def qqueue(ui, repo, name=None, **opts):
 
     def _setactive(name):
         if q.applied:
-            raise util.Abort(_('patches applied - cannot set new queue active'))
+            raise util.Abort(_('new queue created, but cannot make active '
+                               'as patches are applied'))
         _setactivenocheck(name)
 
     def _setactivenocheck(name):
@@ -3384,7 +3412,7 @@ def reposetup(ui, repo):
     class mqrepo(repo.__class__):
         @util.propertycache
         def mq(self):
-            return queue(self.ui, self.path)
+            return queue(self.ui, self.baseui, self.path)
 
         def abortifwdirpatched(self, errmsg, force=False):
             if self.mq.applied and not force:
@@ -3417,7 +3445,7 @@ def reposetup(ui, repo):
                             outapplied.pop()
                 # looking for pushed and shared changeset
                 for node in outapplied:
-                    if repo[node].phase() < phases.secret:
+                    if self[node].phase() < phases.secret:
                         raise util.Abort(_('source has mq patches applied'))
                 # no non-secret patches pushed
             super(mqrepo, self).checkpush(force, revs)
@@ -3433,10 +3461,17 @@ def reposetup(ui, repo):
             mqtags = [(patch.node, patch.name) for patch in q.applied]
 
             try:
-                self.changelog.rev(mqtags[-1][0])
+                # for now ignore filtering business
+                self.unfiltered().changelog.rev(mqtags[-1][0])
             except error.LookupError:
                 self.ui.warn(_('mq status file refers to unknown node %s\n')
                              % short(mqtags[-1][0]))
+                return result
+
+            # do not add fake tags for filtered revisions
+            included = self.changelog.hasnode
+            mqtags = [mqt for mqt in mqtags if included(mqt[0])]
+            if not mqtags:
                 return result
 
             mqtags.append((mqtags[-1][0], 'qtip'))
@@ -3451,41 +3486,6 @@ def reposetup(ui, repo):
                     tags[patch[1]] = patch[0]
 
             return result
-
-        def _branchtags(self, partial, lrev):
-            q = self.mq
-            cl = self.changelog
-            qbase = None
-            if not q.applied:
-                if getattr(self, '_committingpatch', False):
-                    # Committing a new patch, must be tip
-                    qbase = len(cl) - 1
-            else:
-                qbasenode = q.applied[0].node
-                try:
-                    qbase = cl.rev(qbasenode)
-                except error.LookupError:
-                    self.ui.warn(_('mq status file refers to unknown node %s\n')
-                                 % short(qbasenode))
-            if qbase is None:
-                return super(mqrepo, self)._branchtags(partial, lrev)
-
-            start = lrev + 1
-            if start < qbase:
-                # update the cache (excluding the patches) and save it
-                ctxgen = (self[r] for r in xrange(lrev + 1, qbase))
-                self._updatebranchcache(partial, ctxgen)
-                self._writebranchcache(partial, cl.node(qbase - 1), qbase - 1)
-                start = qbase
-            # if start = qbase, the cache is as updated as it should be.
-            # if start > qbase, the cache includes (part of) the patches.
-            # we might as well use it, but we won't save it.
-
-            # update the cache up to the tip
-            ctxgen = (self[r] for r in xrange(start, len(cl)))
-            self._updatebranchcache(partial, ctxgen)
-
-            return partial
 
     if repo.local():
         repo.__class__ = mqrepo
@@ -3543,8 +3543,10 @@ def summary(orig, ui, repo, *args, **kwargs):
     if u:
         m.append(ui.label(_("%d unapplied"), 'qseries.unapplied') % u)
     if m:
-        ui.write("mq:     %s\n" % ', '.join(m))
+        # i18n: column positioning for "hg summary"
+        ui.write(_("mq:     %s\n") % ', '.join(m))
     else:
+        # i18n: column positioning for "hg summary"
         ui.note(_("mq:     (empty queue)\n"))
     return r
 
@@ -3595,3 +3597,5 @@ colortable = {'qguard.negative': 'red',
               'qseries.guarded': 'black bold',
               'qseries.missing': 'red bold',
               'qseries.unapplied': 'black bold'}
+
+commands.inferrepo += " qnew qrefresh qdiff qcommit"

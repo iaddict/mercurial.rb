@@ -52,7 +52,7 @@ class _BY_HANDLE_FILE_INFORMATION(ctypes.Structure):
                 ('nFileIndexHigh', _DWORD),
                 ('nFileIndexLow', _DWORD)]
 
-# CreateFile 
+# CreateFile
 _FILE_SHARE_READ = 0x00000001
 _FILE_SHARE_WRITE = 0x00000002
 _FILE_SHARE_DELETE = 0x00000004
@@ -328,7 +328,7 @@ def spawndetached(args):
     env += '\0'
 
     args = subprocess.list2cmdline(args)
-    # Not running the command in shell mode makes python26 hang when
+    # Not running the command in shell mode makes Python 2.6 hang when
     # writing to hgweb output socket.
     comspec = os.environ.get("COMSPEC", "cmd.exe")
     args = comspec + " /c " + args
@@ -343,6 +343,12 @@ def spawndetached(args):
 
 def unlink(f):
     '''try to implement POSIX' unlink semantics on Windows'''
+
+    if os.path.isdir(f):
+        # use EPERM because it is POSIX prescribed value, even though
+        # unlink(2) on directories returns EISDIR on Linux
+        raise IOError(errno.EPERM,
+                      "Unlinking directory not permitted: '%s'" % f)
 
     # POSIX allows to unlink and rename open files. Windows has serious
     # problems with doing that:
@@ -370,7 +376,7 @@ def unlink(f):
             if e.errno != errno.EEXIST:
                 raise
     else:
-        raise IOError, (errno.EEXIST, "No usable temporary filename found")
+        raise IOError(errno.EEXIST, "No usable temporary filename found")
 
     try:
         os.unlink(temp)

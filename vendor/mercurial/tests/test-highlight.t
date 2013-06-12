@@ -103,7 +103,7 @@ hgweb filerevision, html
   </div>
   
   <div class="main">
-  <h2><a href="/">test</a></h2>
+  <h2 class="breadcrumb"><a href="/">Mercurial</a> </h2>
   <h3>view primes.py @ 0:853dcd4de2a6</h3>
   
   <form class="search" action="/log">
@@ -234,7 +234,7 @@ hgweb fileannotate, html
   </div>
   
   <div class="main">
-  <h2><a href="/">test</a></h2>
+  <h2 class="breadcrumb"><a href="/">Mercurial</a> </h2>
   <h3>annotate primes.py @ 0:853dcd4de2a6</h3>
   
   <form class="search" action="/log">
@@ -545,7 +545,7 @@ hgweb highlightcss friendly
 errors encountered
 
   $ cat errors.log
-  $ "$TESTDIR/killdaemons.py"
+  $ "$TESTDIR/killdaemons.py" $DAEMON_PIDS
 
 Change the pygments style
 
@@ -579,7 +579,7 @@ errors encountered
   $ hg ci -Ama
   adding eucjp.txt
   $ hgserveget () {
-  >     "$TESTDIR/killdaemons.py"
+  >     "$TESTDIR/killdaemons.py" $DAEMON_PIDS
   >     echo % HGENCODING="$1" hg serve
   >     HGENCODING="$1" hg serve -p $HGPORT -d -n test --pid-file=hg.pid -E errors.log
   >     cat hg.pid >> $DAEMON_PIDS

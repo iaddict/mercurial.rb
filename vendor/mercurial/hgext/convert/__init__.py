@@ -61,6 +61,10 @@ def convert(ui, src, dest=None, revmapfile=None, **opts):
     --sourcesort  try to preserve source revisions order, only
                   supported by Mercurial sources.
 
+    --closesort   try to move closed revisions as close as possible
+                  to parent branches, only supported by Mercurial
+                  sources.
+
     If ``REVMAP`` isn't given, it will be put in a default location
     (``<dest>/.hg/shamap`` by default). The ``REVMAP`` is a simple
     text file that maps each source commit ID to the destination ID
@@ -74,7 +78,7 @@ def convert(ui, src, dest=None, revmapfile=None, **opts):
 
     The authormap is a simple text file that maps each source commit
     author to a destination commit author. It is handy for source SCMs
-    that use unix logins to identify authors (eg: CVS). One line per
+    that use unix logins to identify authors (e.g.: CVS). One line per
     author mapping and the line format is::
 
       source author = destination author
@@ -191,12 +195,16 @@ def convert(ui, src, dest=None, revmapfile=None, **opts):
         branch indicated in the regex as the second parent of the
         changeset. Default is ``{{mergefrombranch ([-\\w]+)}}``
 
-    :hook.cvslog: Specify a Python function to be called at the end of
+    :convert.localtimezone: use local time (as determined by the TZ
+        environment variable) for changeset date/times. The default
+        is False (use UTC).
+
+    :hooks.cvslog: Specify a Python function to be called at the end of
         gathering the CVS log. The function is passed a list with the
         log entries, and can modify the entries in-place, or add or
         delete them.
 
-    :hook.cvschangesets: Specify a Python function to be called after
+    :hooks.cvschangesets: Specify a Python function to be called after
         the changesets are calculated from the CVS log. The
         function is passed a list with the changeset entries, and can
         modify the changesets in-place, or add or delete them.
@@ -230,6 +238,10 @@ def convert(ui, src, dest=None, revmapfile=None, **opts):
 
     :convert.svn.trunk: specify the name of the trunk branch. The
         default is ``trunk``.
+
+    :convert.localtimezone: use local time (as determined by the TZ
+        environment variable) for changeset date/times. The default
+        is False (use UTC).
 
     Source history can be retrieved starting at a specific revision,
     instead of being integrally converted. Only single branch
@@ -310,7 +322,8 @@ cmdtable = {
            _('change branch names while converting'), _('FILE')),
           ('', 'branchsort', None, _('try to sort changesets by branches')),
           ('', 'datesort', None, _('try to sort changesets by date')),
-          ('', 'sourcesort', None, _('preserve source changesets order'))],
+          ('', 'sourcesort', None, _('preserve source changesets order')),
+          ('', 'closesort', None, _('try to reorder closed revisions'))],
          _('hg convert [OPTION]... SOURCE [DEST [REVMAP]]')),
     "debugsvnlog":
         (debugsvnlog,

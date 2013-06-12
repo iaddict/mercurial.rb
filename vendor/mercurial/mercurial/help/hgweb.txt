@@ -11,7 +11,7 @@ but recognizes only the following sections:
   - paths
   - collections
 
-The ``web`` options are thorougly described in :hg:`help config`.
+The ``web`` options are thoroughly described in :hg:`help config`.
 
 The ``paths`` section maps URL paths to paths of repositories in the
 filesystem. hgweb will not expose the filesystem directly - only
@@ -46,5 +46,5 @@ In this example::
 - The fourth entry will publish both ``http://server/user/bob/quux/``
   and ``http://server/user/bob/quux/testsubrepo/``
 
-The ``collections`` section is deprecated and has been superseeded by
+The ``collections`` section is deprecated and has been superseded by
 ``paths``.

@@ -40,8 +40,14 @@
   $ hg tag -r 0 x y z y y z
   abort: tag names must be unique
   [255]
-  $ hg tag tap nada dot tip null .
+  $ hg tag tap nada dot tip
   abort: the name 'tip' is reserved
+  [255]
+  $ hg tag .
+  abort: the name '.' is reserved
+  [255]
+  $ hg tag null
+  abort: the name 'null' is reserved
   [255]
   $ hg tag "bleah"
   abort: tag 'bleah' already exists (use -f to force)
@@ -110,10 +116,10 @@ tagging on a non-head revision
 
   $ hg tag -l 'xx
   > newline'
-  abort: '\n' cannot be used in a tag name
+  abort: '\n' cannot be used in a name
   [255]
   $ hg tag -l 'xx:xx'
-  abort: ':' cannot be used in a tag name
+  abort: ':' cannot be used in a name
   [255]
 
 cloning local tags
@@ -258,11 +264,11 @@ tagging on null rev
 
   $ hg init empty
   $ hg tag -R empty nullrev
-  abort: null revision specified
+  abort: cannot tag null revision
   [255]
 
   $ hg tag -R empty -r 00000000000 -f nulltag
-  abort: null revision specified
+  abort: cannot tag null revision
   [255]
 
   $ cd ..
@@ -310,7 +316,7 @@ commit hook on tag used to be run without write lock - issue3344
   adding test
   $ hg init repo-tag-target
   $ hg -R repo-tag --config hooks.commit="\"hg\" push \"`pwd`/repo-tag-target\"" tag tag
-  pushing to $TESTTMP/repo-tag-target
+  pushing to $TESTTMP/repo-tag-target (glob)
   searching for changes
   adding changesets
   adding manifests

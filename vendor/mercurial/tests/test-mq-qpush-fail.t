@@ -34,7 +34,7 @@ test qpush on empty series
   $ python -c 'print "\xe9"' > message
   $ cat .hg/patches/bad-patch >> message
   $ mv message .hg/patches/bad-patch
-  $ hg qpush -a && echo 'qpush succeded?!'
+  $ hg qpush -a && echo 'qpush succeeded?!'
   applying patch1
   applying patch2
   applying bad-patch
@@ -61,7 +61,6 @@ test corrupt status file
   patch queue now empty
   $ cp .hg/patches/status.orig .hg/patches/status
   $ hg qpush
-  mq status file refers to unknown node * (glob)
   abort: working directory revision is not qtip
   [255]
   $ rm .hg/patches/status .hg/patches/status.orig

@@ -1,4 +1,4 @@
-# util.py - Mercurial utility functions and platform specfic implementations
+# util.py - Mercurial utility functions and platform specific implementations
 #
 #  Copyright 2005 K. Thananchayan <thananck@yahoo.com>
 #  Copyright 2005-2007 Matt Mackall <mpm@selenic.com>
@@ -7,7 +7,7 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2 or any later version.
 
-"""Mercurial utility functions and platform specfic implementations.
+"""Mercurial utility functions and platform specific implementations.
 
 This contains helper routines that are independent of the SCM core and
 hide platform-specific details from the core.
@@ -45,7 +45,6 @@ makedir = platform.makedir
 nlinks = platform.nlinks
 normpath = platform.normpath
 normcase = platform.normcase
-nulldev = platform.nulldev
 openhardlinks = platform.openhardlinks
 oslink = platform.oslink
 parsepatchoutput = platform.parsepatchoutput
@@ -63,8 +62,11 @@ setflags = platform.setflags
 setsignalhandler = platform.setsignalhandler
 shellquote = platform.shellquote
 spawndetached = platform.spawndetached
+split = platform.split
 sshargs = platform.sshargs
-statfiles = platform.statfiles
+statfiles = getattr(osutil, 'statfiles', platform.statfiles)
+statisexec = platform.statisexec
+statislink = platform.statislink
 termwidth = platform.termwidth
 testpid = platform.testpid
 umask = platform.umask
@@ -129,13 +131,17 @@ def popen2(cmd, env=None, newlines=False):
     return p.stdin, p.stdout
 
 def popen3(cmd, env=None, newlines=False):
+    stdin, stdout, stderr, p = popen4(cmd, env, newlines)
+    return stdin, stdout, stderr
+
+def popen4(cmd, env=None, newlines=False):
     p = subprocess.Popen(cmd, shell=True, bufsize=-1,
                          close_fds=closefds,
                          stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                          stderr=subprocess.PIPE,
                          universal_newlines=newlines,
                          env=env)
-    return p.stdin, p.stdout, p.stderr
+    return p.stdin, p.stdout, p.stderr, p
 
 def version():
     """Return version information if available."""
@@ -211,6 +217,31 @@ except AttributeError:
                     del self[i]
                     break
 
+class lrucachedict(object):
+    '''cache most recent gets from or sets to this dictionary'''
+    def __init__(self, maxsize):
+        self._cache = {}
+        self._maxsize = maxsize
+        self._order = deque()
+
+    def __getitem__(self, key):
+        value = self._cache[key]
+        self._order.remove(key)
+        self._order.append(key)
+        return value
+
+    def __setitem__(self, key, value):
+        if key not in self._cache:
+            if len(self._cache) >= self._maxsize:
+                del self._cache[self._order.popleft()]
+        else:
+            self._order.remove(key)
+        self._cache[key] = value
+        self._order.append(key)
+
+    def __contains__(self, key):
+        return key in self._cache
+
 def lrucachefunc(func):
     '''cache most recent results of function calls'''
     cache = {}
@@ -244,8 +275,11 @@ class propertycache(object):
         self.name = func.__name__
     def __get__(self, obj, type=None):
         result = self.func(obj)
-        setattr(obj, self.name, result)
+        self.cachevalue(obj, result)
         return result
+
+    def cachevalue(self, obj, value):
+        setattr(obj, self.name, value)
 
 def pipefilter(s, cmd):
     '''filter string S through command CMD, returning its output'''
@@ -479,11 +513,9 @@ def checksignature(func):
 
 def copyfile(src, dest):
     "copy a file, preserving mode and atime/mtime"
+    if os.path.lexists(dest):
+        unlink(dest)
     if os.path.islink(src):
-        try:
-            os.unlink(dest)
-        except OSError:
-            pass
         os.symlink(os.readlink(src), dest)
     else:
         try:
@@ -605,7 +637,7 @@ def fstat(fp):
 
 def checkcase(path):
     """
-    Check whether the given path is on a case-sensitive filesystem
+    Return true if the given path is on a case-sensitive filesystem
 
     Requires a path (like /foo/.hg) ending with a foldable final
     directory component.
@@ -632,10 +664,12 @@ try:
 except ImportError:
     _re2 = False
 
-def compilere(pat):
+def compilere(pat, flags=0):
     '''Compile a regular expression, using re2 if possible
 
-    For best performance, use only re2-compatible regexp features.'''
+    For best performance, use only re2-compatible regexp features. The
+    only flags from the re module that are re2-compatible are
+    IGNORECASE and MULTILINE.'''
     global _re2
     if _re2 is None:
         try:
@@ -643,12 +677,16 @@ def compilere(pat):
             _re2 = True
         except ImportError:
             _re2 = False
-    if _re2:
+    if _re2 and (flags & ~(re.IGNORECASE | re.MULTILINE)) == 0:
+        if flags & re.IGNORECASE:
+            pat = '(?i)' + pat
+        if flags & re.MULTILINE:
+            pat = '(?m)' + pat
         try:
             return re2.compile(pat)
         except re2.error:
             pass
-    return re.compile(pat)
+    return re.compile(pat, flags)
 
 _fspathcache = {}
 def fspath(name, root):
@@ -731,8 +769,6 @@ def checknlink(testfile):
             except OSError:
                 pass
 
-    return False
-
 def endswithsep(path):
     '''Check path ends with os.sep or os.altsep.'''
     return path.endswith(os.sep) or os.altsep and path.endswith(os.altsep)
@@ -800,7 +836,7 @@ def mktempcopy(name, emptyok=False, createmode=None):
     return temp
 
 class atomictempfile(object):
-    '''writeable file object that atomically updates a file
+    '''writable file object that atomically updates a file
 
     All writes will go to a temporary copy of the original file. Call
     close() when you are done writing, and atomictempfile will rename
@@ -837,10 +873,10 @@ class atomictempfile(object):
         if safehasattr(self, '_fp'): # constructor actually did something
             self.discard()
 
-def makedirs(name, mode=None):
+def makedirs(name, mode=None, notindexed=False):
     """recursive directory creation with parent mode inheritance"""
     try:
-        os.mkdir(name)
+        makedir(name, notindexed)
     except OSError, err:
         if err.errno == errno.EEXIST:
             return
@@ -849,8 +885,25 @@ def makedirs(name, mode=None):
         parent = os.path.dirname(os.path.abspath(name))
         if parent == name:
             raise
-        makedirs(parent, mode)
+        makedirs(parent, mode, notindexed)
+        makedir(name, notindexed)
+    if mode is not None:
+        os.chmod(name, mode)
+
+def ensuredirs(name, mode=None):
+    """race-safe recursive directory creation"""
+    if os.path.isdir(name):
+        return
+    parent = os.path.dirname(os.path.abspath(name))
+    if parent != name:
+        ensuredirs(parent, mode)
+    try:
         os.mkdir(name)
+    except OSError, err:
+        if err.errno == errno.EEXIST and os.path.isdir(name):
+            # someone else seems to have won a directory creation race
+            return
+        raise
     if mode is not None:
         os.chmod(name, mode)
 
@@ -899,7 +952,7 @@ class chunkbuffer(object):
         """Read L bytes of data from the iterator of chunks of data.
         Returns less than L bytes if the iterator runs dry."""
         left = l
-        buf = ''
+        buf = []
         queue = self._queue
         while left > 0:
             # refill the queue
@@ -917,11 +970,11 @@ class chunkbuffer(object):
             left -= len(chunk)
             if left < 0:
                 queue.appendleft(chunk[left:])
-                buf += chunk[:left]
+                buf.append(chunk[:left])
             else:
-                buf += chunk
+                buf.append(chunk)
 
-        return buf
+        return ''.join(buf)
 
 def filechunkiter(f, size=65536, limit=None):
     """Create a generator that produces the data in the file size
@@ -1026,6 +1079,20 @@ def parsedate(date, formats=None, bias={}):
 
     The date may be a "unixtime offset" string or in one of the specified
     formats. If the date already is a (unixtime, offset) tuple, it is returned.
+
+    >>> parsedate(' today ') == parsedate(\
+                                  datetime.date.today().strftime('%b %d'))
+    True
+    >>> parsedate( 'yesterday ') == parsedate((datetime.date.today() -\
+                                               datetime.timedelta(days=1)\
+                                              ).strftime('%b %d'))
+    True
+    >>> now, tz = makedate()
+    >>> strnow, strtz = parsedate('now')
+    >>> (strnow - now) < 1
+    True
+    >>> tz == strtz
+    True
     """
     if not date:
         return 0, 0
@@ -1034,6 +1101,15 @@ def parsedate(date, formats=None, bias={}):
     if not formats:
         formats = defaultdateformats
     date = date.strip()
+
+    if date == _('now'):
+        return makedate()
+    if date == _('today'):
+        date = datetime.date.today().strftime('%b %d')
+    elif date == _('yesterday'):
+        date = (datetime.date.today() -
+                datetime.timedelta(days=1)).strftime('%b %d')
+
     try:
         when, offset = map(int, date.split(' '))
     except ValueError:
@@ -1202,7 +1278,18 @@ def ellipsis(text, maxlength=400):
     except (UnicodeDecodeError, UnicodeEncodeError):
         return _ellipsis(text, maxlength)[0]
 
-_byteunits = (
+def unitcountfn(*unittable):
+    '''return a function that renders a readable count of some quantity'''
+
+    def go(count):
+        for multiplier, divisor, format in unittable:
+            if count >= divisor * multiplier:
+                return format % (count / float(divisor))
+        return unittable[-1][2] % count
+
+    return go
+
+bytecount = unitcountfn(
     (100, 1 << 30, _('%.0f GB')),
     (10, 1 << 30, _('%.1f GB')),
     (1, 1 << 30, _('%.2f GB')),
@@ -1214,14 +1301,6 @@ _byteunits = (
     (1, 1 << 10, _('%.2f KB')),
     (1, 1, _('%.0f bytes')),
     )
-
-def bytecount(nbytes):
-    '''return byte count formatted as readable string, with units'''
-
-    for multiplier, divisor, format in _byteunits:
-        if nbytes >= divisor * multiplier:
-            return format % (nbytes / float(divisor))
-    return _byteunits[-1][2] % nbytes
 
 def uirepr(s):
     # Avoid double backslash in Windows path repr()
@@ -1240,7 +1319,7 @@ def MBTextWrapper(**kwargs):
         so overriding is needed to use width information of each characters.
 
         In addition, characters classified into 'ambiguous' width are
-        treated as wide in east asian area, but as narrow in other.
+        treated as wide in East Asian area, but as narrow in other.
 
         This requires use decision to determine width of such characters.
         """
@@ -1301,7 +1380,7 @@ def MBTextWrapper(**kwargs):
                 width = self.width - len(indent)
 
                 # First chunk on line is whitespace -- drop it, unless this
-                # is the very beginning of the text (ie. no lines started yet).
+                # is the very beginning of the text (i.e. no lines started yet).
                 if self.drop_whitespace and chunks[-1].strip() == '' and lines:
                     del chunks[-1]
 
@@ -1478,7 +1557,11 @@ _hextochr = dict((a + b, chr(int(a + b, 16)))
                  for a in _hexdig for b in _hexdig)
 
 def _urlunquote(s):
-    """unquote('abc%20def') -> 'abc def'."""
+    """Decode HTTP/HTML % encoding.
+
+    >>> _urlunquote('abc%20def')
+    'abc def'
+    """
     res = s.split('%')
     # fastpath
     if len(res) == 1:
@@ -1609,7 +1692,6 @@ class url(object):
                 parts = path[2:].split('/', 1)
                 if len(parts) > 1:
                     self.host, path = parts
-                    path = path
                 else:
                     self.host = parts[0]
                     path = None
@@ -1799,3 +1881,46 @@ def isatty(fd):
         return fd.isatty()
     except AttributeError:
         return False
+
+timecount = unitcountfn(
+    (1, 1e3, _('%.0f s')),
+    (100, 1, _('%.1f s')),
+    (10, 1, _('%.2f s')),
+    (1, 1, _('%.3f s')),
+    (100, 0.001, _('%.1f ms')),
+    (10, 0.001, _('%.2f ms')),
+    (1, 0.001, _('%.3f ms')),
+    (100, 0.000001, _('%.1f us')),
+    (10, 0.000001, _('%.2f us')),
+    (1, 0.000001, _('%.3f us')),
+    (100, 0.000000001, _('%.1f ns')),
+    (10, 0.000000001, _('%.2f ns')),
+    (1, 0.000000001, _('%.3f ns')),
+    )
+
+_timenesting = [0]
+
+def timed(func):
+    '''Report the execution time of a function call to stderr.
+
+    During development, use as a decorator when you need to measure
+    the cost of a function, e.g. as follows:
+
+    @util.timed
+    def foo(a, b, c):
+        pass
+    '''
+
+    def wrapper(*args, **kwargs):
+        start = time.time()
+        indent = 2
+        _timenesting[0] += indent
+        try:
+            return func(*args, **kwargs)
+        finally:
+            elapsed = time.time() - start
+            _timenesting[0] -= indent
+            sys.stderr.write('%s%s: %s\n' %
+                             (' ' * _timenesting[0], func.__name__,
+                              timecount(elapsed)))
+    return wrapper

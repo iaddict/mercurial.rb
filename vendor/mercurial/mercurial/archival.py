@@ -12,6 +12,12 @@ import cmdutil
 import scmutil, util, encoding
 import cStringIO, os, tarfile, time, zipfile
 import zlib, gzip
+import struct
+import error
+
+# from unzip source code:
+_UNX_IFREG = 0x8000
+_UNX_IFLNK = 0xa000
 
 def tidyprefix(dest, kind, prefix):
     '''choose prefix to use for names in archive.  make sure prefix is
@@ -69,8 +75,11 @@ class tarit(object):
         def _write_gzip_header(self):
             self.fileobj.write('\037\213')             # magic header
             self.fileobj.write('\010')                 # compression method
-            # Python 2.6 deprecates self.filename
-            fname = getattr(self, 'name', None) or self.filename
+            # Python 2.6 introduced self.name and deprecated self.filename
+            try:
+                fname = self.name
+            except AttributeError:
+                fname = self.filename
             if fname and fname.endswith('.gz'):
                 fname = fname[:-3]
             flags = 0
@@ -98,7 +107,6 @@ class tarit(object):
                 self.fileobj = gzfileobj
                 return tarfile.TarFile.taropen(name, mode, gzfileobj)
             else:
-                self.fileobj = fileobj
                 return tarfile.open(name, mode + kind, fileobj)
 
         if isinstance(dest, str):
@@ -165,6 +173,7 @@ class zipit(object):
         if mtime < epoch:
             mtime = epoch
 
+        self.mtime = mtime
         self.date_time = time.gmtime(mtime)[:6]
 
     def addfile(self, name, mode, islink, data):
@@ -173,11 +182,19 @@ class zipit(object):
         # unzip will not honor unix file modes unless file creator is
         # set to unix (id 3).
         i.create_system = 3
-        ftype = 0x8000 # UNX_IFREG in unzip source code
+        ftype = _UNX_IFREG
         if islink:
             mode = 0777
-            ftype = 0xa000 # UNX_IFLNK in unzip source code
+            ftype = _UNX_IFLNK
         i.external_attr = (mode | ftype) << 16L
+        # add "extended-timestamp" extra block, because zip archives
+        # without this will be extracted with unexpected timestamp,
+        # if TZ is not configured as GMT
+        i.extra += struct.pack('<hhBl',
+                               0x5455,     # block type: "extended-timestamp"
+                               1 + 4,      # size of this block
+                               1,          # "modification time is present"
+                               int(self.mtime)) # last modification (UTC)
         self.z.writestr(i, data)
 
     def done(self):
@@ -272,20 +289,25 @@ def archive(repo, dest, node, kind, decode=True, matchfn=None,
         files = [f for f in ctx.manifest().keys() if matchfn(f)]
     else:
         files = ctx.manifest().keys()
-    files.sort()
     total = len(files)
-    repo.ui.progress(_('archiving'), 0, unit=_('files'), total=total)
-    for i, f in enumerate(files):
-        ff = ctx.flags(f)
-        write(f, 'x' in ff and 0755 or 0644, 'l' in ff, ctx[f].data)
-        repo.ui.progress(_('archiving'), i + 1, item=f,
-                         unit=_('files'), total=total)
-    repo.ui.progress(_('archiving'), None)
+    if total:
+        files.sort()
+        repo.ui.progress(_('archiving'), 0, unit=_('files'), total=total)
+        for i, f in enumerate(files):
+            ff = ctx.flags(f)
+            write(f, 'x' in ff and 0755 or 0644, 'l' in ff, ctx[f].data)
+            repo.ui.progress(_('archiving'), i + 1, item=f,
+                             unit=_('files'), total=total)
+        repo.ui.progress(_('archiving'), None)
 
     if subrepos:
-        for subpath in ctx.substate:
+        for subpath in sorted(ctx.substate):
             sub = ctx.sub(subpath)
             submatch = matchmod.narrowmatcher(subpath, matchfn)
-            sub.archive(repo.ui, archiver, prefix, submatch)
+            total += sub.archive(repo.ui, archiver, prefix, submatch)
+
+    if total == 0:
+        raise error.Abort(_('no files match the archive pattern'))
 
     archiver.done()
+    return total

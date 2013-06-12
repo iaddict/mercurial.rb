@@ -144,8 +144,10 @@ def churn(ui, repo, *pats, **opts):
     if not rate:
         return
 
-    sortkey = ((not opts.get('sort')) and (lambda x: -sum(x[1])) or None)
-    rate.sort(key=sortkey)
+    if opts.get('sort'):
+        rate.sort()
+    else:
+        rate.sort(key=lambda x: (-sum(x[1]), x))
 
     # Be careful not to have a zero maxcount (issue833)
     maxcount = float(max(sum(v) for k, v in rate)) or 1.0
@@ -197,3 +199,5 @@ cmdtable = {
           ] + commands.walkopts,
          _("hg churn [-d DATE] [-r REV] [--aliases FILE] [FILE]")),
 }
+
+commands.inferrepo += " churn"

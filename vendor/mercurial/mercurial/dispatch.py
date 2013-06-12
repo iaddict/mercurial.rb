@@ -62,7 +62,16 @@ def dispatch(req):
             ferr.write(_("hg: parse error: %s\n") % inst.args[0])
         return -1
 
-    return _runcatch(req)
+    msg = ' '.join(' ' in a and repr(a) or a for a in req.args)
+    starttime = time.time()
+    ret = None
+    try:
+        ret = _runcatch(req)
+        return ret
+    finally:
+        duration = time.time() - starttime
+        req.ui.log("commandfinish", "%s exited %s after %0.2f seconds\n",
+                   msg, ret or 0, duration)
 
 def _runcatch(req):
     def catchterm(*args):
@@ -151,6 +160,9 @@ def _runcatch(req):
             commands.help_(ui, inst.args[0], unknowncmd=True)
         except error.UnknownCommand:
             commands.help_(ui, 'shortlist')
+    except error.InterventionRequired, inst:
+        ui.warn("%s\n" % inst)
+        return 1
     except util.Abort, inst:
         ui.warn(_("abort: %s\n") % inst)
         if inst.hint:
@@ -183,8 +195,8 @@ def _runcatch(req):
         else:
             raise
     except OSError, inst:
-        if getattr(inst, "filename", None):
-            ui.warn(_("abort: %s: %s\n") % (inst.strerror, inst.filename))
+        if getattr(inst, "filename", None) is not None:
+            ui.warn(_("abort: %s: '%s'\n") % (inst.strerror, inst.filename))
         else:
             ui.warn(_("abort: %s\n") % inst.strerror)
     except KeyboardInterrupt:
@@ -217,11 +229,11 @@ def _runcatch(req):
         ct = tuplever(compare)
         worst = None, ct, ''
         for name, mod in extensions.extensions():
-            testedwith = getattr(mod, 'testedwith', 'unknown')
+            testedwith = getattr(mod, 'testedwith', '')
             report = getattr(mod, 'buglink', _('the extension author.'))
-            if testedwith == 'unknown':
+            if not testedwith.strip():
                 # We found an untested extension. It's likely the culprit.
-                worst = name, testedwith, report
+                worst = name, 'unknown', report
                 break
             if compare not in testedwith.split() and testedwith != 'internal':
                 tested = [tuplever(v) for v in testedwith.split()]
@@ -247,6 +259,7 @@ def _runcatch(req):
                     (_("** Mercurial Distributed SCM (version %s)\n") % myver) +
                     (_("** Extensions loaded: %s\n") %
                      ", ".join([x[0] for x in extensions.extensions()])))
+        ui.log("commandexception", "%s\n%s\n", warning, traceback.format_exc())
         ui.warn(warning)
         raise
 
@@ -333,7 +346,7 @@ class cmdalias(object):
         self.cmdname = cmd = args.pop(0)
         args = map(util.expandpath, args)
 
-        for invalidarg in ("--cwd", "-R", "--repository", "--repo"):
+        for invalidarg in ("--cwd", "-R", "--repository", "--repo", "--config"):
             if _earlygetopt([invalidarg], args):
                 def fn(ui, *args):
                     ui.warn(_("error in definition for alias '%s': %s may only "
@@ -481,6 +494,22 @@ def _earlygetopt(aliases, args):
 
     The values are listed in the order they appear in args.
     The options and values are removed from args.
+
+    >>> args = ['x', '--cwd', 'foo', 'y']
+    >>> _earlygetopt(['--cwd'], args), args
+    (['foo'], ['x', 'y'])
+
+    >>> args = ['x', '--cwd=bar', 'y']
+    >>> _earlygetopt(['--cwd'], args), args
+    (['bar'], ['x', 'y'])
+
+    >>> args = ['x', '-R', 'foo', 'y']
+    >>> _earlygetopt(['-R'], args), args
+    (['foo'], ['x', 'y'])
+
+    >>> args = ['x', '-Rbar', 'y']
+    >>> _earlygetopt(['-R'], args), args
+    (['bar'], ['x', 'y'])
     """
     try:
         argcount = args.index("--")
@@ -490,14 +519,22 @@ def _earlygetopt(aliases, args):
     values = []
     pos = 0
     while pos < argcount:
-        if args[pos] in aliases:
-            if pos + 1 >= argcount:
-                # ignore and let getopt report an error if there is no value
-                break
+        fullarg = arg = args[pos]
+        equals = arg.find('=')
+        if equals > -1:
+            arg = arg[:equals]
+        if arg in aliases:
             del args[pos]
-            values.append(args.pop(pos))
-            argcount -= 2
-        elif args[pos][:2] in shortopts:
+            if equals > -1:
+                values.append(fullarg[equals + 1:])
+                argcount -= 1
+            else:
+                if pos + 1 >= argcount:
+                    # ignore and let getopt report an error if there is no value
+                    break
+                values.append(args.pop(pos))
+                argcount -= 2
+        elif arg[:2] in shortopts:
             # short option can have no following space, e.g. hg log -Rfoo
             values.append(args.pop(pos)[2:])
             argcount -= 1
@@ -507,10 +544,8 @@ def _earlygetopt(aliases, args):
 
 def runcommand(lui, repo, cmd, fullargs, ui, options, d, cmdpats, cmdoptions):
     # run pre-hook, and abort if it fails
-    ret = hook.hook(lui, repo, "pre-%s" % cmd, False, args=" ".join(fullargs),
-                    pats=cmdpats, opts=cmdoptions)
-    if ret:
-        return ret
+    hook.hook(lui, repo, "pre-%s" % cmd, True, args=" ".join(fullargs),
+              pats=cmdpats, opts=cmdoptions)
     ret = _runcommand(ui, options, cmd, d)
     # run post-hook, passing command result
     hook.hook(lui, repo, "post-%s" % cmd, False, args=" ".join(fullargs),
@@ -710,12 +745,15 @@ def _dispatch(req):
                 repo = hg.repository(ui, path=path)
                 if not repo.local():
                     raise util.Abort(_("repository '%s' is not local") % path)
+                if options['hidden']:
+                    repo = repo.unfiltered()
                 repo.ui.setconfig("bundle", "mainreporoot", repo.root)
             except error.RequirementError:
                 raise
             except error.RepoError:
                 if cmd not in commands.optionalrepo.split():
-                    if args and not path: # try to infer -R from command args
+                    if (cmd in commands.inferrepo.split() and
+                        args and not path): # try to infer -R from command args
                         repos = map(cmdutil.findrepo, args)
                         guess = repos[0]
                         if guess and repos.count(guess) == len(repos):
@@ -733,7 +771,7 @@ def _dispatch(req):
         ui.warn(_("warning: --repository ignored\n"))
 
     msg = ' '.join(' ' in a and repr(a) or a for a in fullargs)
-    ui.log("command", msg + "\n")
+    ui.log("command", '%s\n', msg)
     d = lambda: util.checksignature(func)(ui, *args, **cmdoptions)
     try:
         return runcommand(lui, repo, cmd, fullargs, ui, options, d,
@@ -745,6 +783,7 @@ def _dispatch(req):
 def lsprofile(ui, func, fp):
     format = ui.config('profiling', 'format', default='text')
     field = ui.config('profiling', 'sort', default='inlinetime')
+    limit = ui.configint('profiling', 'limit', default=30)
     climit = ui.configint('profiling', 'nested', default=5)
 
     if format not in ['text', 'kcachegrind']:
@@ -773,7 +812,7 @@ def lsprofile(ui, func, fp):
             # format == 'text'
             stats = lsprof.Stats(p.getstats())
             stats.sort(field)
-            stats.pprint(limit=30, file=fp, climit=climit)
+            stats.pprint(limit=limit, file=fp, climit=climit)
 
 def statprofile(ui, func, fp):
     try:

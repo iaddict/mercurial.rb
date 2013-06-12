@@ -7,7 +7,8 @@
 
 from node import nullid, short
 from i18n import _
-import util, setdiscovery, treediscovery, phases, obsolete
+import util, setdiscovery, treediscovery, phases, obsolete, bookmarks
+import branchmap
 
 def findcommonincoming(repo, remote, heads=None, force=False):
     """Return a tuple (common, anyincoming, heads) used to identify the common
@@ -21,7 +22,7 @@ def findcommonincoming(repo, remote, heads=None, force=False):
       any longer.
     "heads" is either the supplied heads, or else the remote's heads.
 
-    If you pass heads and they are all known locally, the reponse lists justs
+    If you pass heads and they are all known locally, the response lists just
     these heads in "common" and in "heads".
 
     Please use findcommonoutgoing to compute the set of outgoing nodes to give
@@ -114,7 +115,7 @@ def findcommonoutgoing(repo, other, onlyheads=None, force=False,
         og.missingheads = onlyheads or repo.heads()
     elif onlyheads is None:
         # use visible heads as it should be cached
-        og.missingheads = visibleheads(repo)
+        og.missingheads = repo.filtered("served").heads()
         og.excluded = [ctx.node() for ctx in repo.set('secret() or extinct()')]
     else:
         # compute common, missing and exclude secret stuff
@@ -192,9 +193,10 @@ def _headssummary(repo, remote, outgoing):
 
     # D. Update newmap with outgoing changes.
     # This will possibly add new heads and remove existing ones.
-    newmap = dict((branch, heads[1]) for branch, heads in headssum.iteritems()
-                  if heads[0] is not None)
-    repo._updatebranchcache(newmap, missingctx)
+    newmap = branchmap.branchcache((branch, heads[1])
+                                 for branch, heads in headssum.iteritems()
+                                 if heads[0] is not None)
+    newmap.update(repo, (ctx.rev() for ctx in missingctx))
     for branch, newheads in newmap.iteritems():
         headssum[branch][1][:] = newheads
     return headssum
@@ -205,7 +207,7 @@ def _oldheadssummary(repo, remoteheads, outgoing, inc=False):
     cl = repo.changelog
     # 1-4b. old servers: Check for new topological heads.
     # Construct {old,new}map with branch = None (topological branch).
-    # (code based on _updatebranchcache)
+    # (code based on update)
     oldheads = set(h for h in remoteheads if h in cl.nodemap)
     # all nodes in outgoing.missing are children of either:
     # - an element of oldheads
@@ -255,7 +257,7 @@ def checkheads(repo, remote, outgoing, remoteheads, newbranch=False, inc=False):
         rnode = remotebookmarks.get(bm)
         if rnode and rnode in repo:
             lctx, rctx = repo[bm], repo[rnode]
-            if rctx == lctx.ancestor(rctx):
+            if bookmarks.validdest(repo, rctx, lctx):
                 bookmarkedheads.add(lctx.node())
 
     # 3. Check for new heads.
@@ -264,24 +266,26 @@ def checkheads(repo, remote, outgoing, remoteheads, newbranch=False, inc=False):
     error = None
     unsynced = False
     allmissing = set(outgoing.missing)
-    for branch, heads in headssum.iteritems():
+    allfuturecommon = set(c.node() for c in repo.set('%ld', outgoing.common))
+    allfuturecommon.update(allmissing)
+    for branch, heads in sorted(headssum.iteritems()):
         if heads[0] is None:
             # Maybe we should abort if we push more that one head
             # for new branches ?
             continue
-        if heads[2]:
-            unsynced = True
-        oldhs = set(heads[0])
         candidate_newhs = set(heads[1])
         # add unsynced data
+        oldhs = set(heads[0])
         oldhs.update(heads[2])
         candidate_newhs.update(heads[2])
         dhs = None
+        discardedheads = set()
         if repo.obsstore:
             # remove future heads which are actually obsolete by another
             # pushed element:
             #
-            # XXX There is several case this case does not handle properly
+            # XXX as above, There are several cases this case does not handle
+            # XXX properly
             #
             # (1) if <nh> is public, it won't be affected by obsolete marker
             #     and a new is created
@@ -293,16 +297,22 @@ def checkheads(repo, remote, outgoing, remoteheads, newbranch=False, inc=False):
             # more tricky for unsynced changes.
             newhs = set()
             for nh in candidate_newhs:
-                for suc in obsolete.anysuccessors(repo.obsstore, nh):
-                    if suc != nh and suc in allmissing:
-                        break
-                else:
+                if nh in repo and repo[nh].phase() <= phases.public:
                     newhs.add(nh)
+                else:
+                    for suc in obsolete.allsuccessors(repo.obsstore, [nh]):
+                        if suc != nh and suc in allfuturecommon:
+                            discardedheads.add(nh)
+                            break
+                    else:
+                        newhs.add(nh)
         else:
             newhs = candidate_newhs
+        if [h for h in heads[2] if h not in discardedheads]:
+            unsynced = True
         if len(newhs) > len(oldhs):
             # strip updates to existing remote heads from the new heads list
-            dhs = list(newhs - bookmarkedheads - oldhs)
+            dhs = sorted(newhs - bookmarkedheads - oldhs)
         if dhs:
             if error is None:
                 if branch not in ('default', None):
@@ -327,43 +337,3 @@ def checkheads(repo, remote, outgoing, remoteheads, newbranch=False, inc=False):
     # 6. Check for unsynced changes on involved branches.
     if unsynced:
         repo.ui.warn(_("note: unsynced remote changes!\n"))
-
-def visibleheads(repo):
-    """return the set of visible head of this repo"""
-    # XXX we want a cache on this
-    sroots = repo._phasecache.phaseroots[phases.secret]
-    if sroots or repo.obsstore:
-        # XXX very slow revset. storing heads or secret "boundary"
-        # would help.
-        revset = repo.set('heads(not (%ln:: + extinct()))', sroots)
-
-        vheads = [ctx.node() for ctx in revset]
-        if not vheads:
-            vheads.append(nullid)
-    else:
-        vheads = repo.heads()
-    return vheads
-
-
-def visiblebranchmap(repo):
-    """return a branchmap for the visible set"""
-    # XXX Recomputing this data on the fly is very slow.  We should build a
-    # XXX cached version while computin the standard branchmap version.
-    sroots = repo._phasecache.phaseroots[phases.secret]
-    if sroots or repo.obsstore:
-        vbranchmap = {}
-        for branch, nodes in  repo.branchmap().iteritems():
-            # search for secret heads.
-            for n in nodes:
-                if repo[n].phase() >= phases.secret:
-                    nodes = None
-                    break
-            # if secret heads were found we must compute them again
-            if nodes is None:
-                s = repo.set('heads(branch(%s) - secret() - extinct())',
-                             branch)
-                nodes = [c.node() for c in s]
-            vbranchmap[branch] = nodes
-    else:
-        vbranchmap = repo.branchmap()
-    return vbranchmap

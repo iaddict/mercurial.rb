@@ -10,7 +10,6 @@ from i18n import _
 from node import bin, hex
 import changegroup as changegroupmod
 import peer, error, encoding, util, store
-import discovery, phases
 
 # abstract batching support
 
@@ -346,6 +345,7 @@ class ooberror(object):
         self.message = message
 
 def dispatch(repo, proto, command):
+    repo = repo.filtered("served")
     func, spec = commands[command]
     args = proto.getargs(spec)
     return func(repo, proto, *args)
@@ -362,6 +362,7 @@ def options(cmd, keys, others):
     return opts
 
 def batch(repo, proto, cmds, others):
+    repo = repo.filtered("served")
     res = []
     for pair in cmds.split(';'):
         op, args = pair.split(' ', 1)
@@ -399,7 +400,7 @@ def between(repo, proto, pairs):
     return "".join(r)
 
 def branchmap(repo, proto):
-    branchmap = discovery.visiblebranchmap(repo)
+    branchmap = repo.branchmap()
     heads = []
     for branch, nodes in branchmap.iteritems():
         branchname = urllib.quote(encoding.fromlocal(branch))
@@ -455,7 +456,7 @@ def getbundle(repo, proto, others):
     return streamres(proto.groupchunks(cg))
 
 def heads(repo, proto):
-    h = discovery.visibleheads(repo)
+    h = repo.heads()
     return encodelist(h) + "\n"
 
 def hello(repo, proto):
@@ -478,8 +479,6 @@ def lookup(repo, proto, key):
     try:
         k = encoding.tolocal(key)
         c = repo[k]
-        if c.phase() == phases.secret:
-            raise error.RepoLookupError(_("unknown revision '%s'") % k)
         r = c.hex()
         success = 1
     except Exception, inst:
@@ -503,6 +502,20 @@ def pushkey(repo, proto, namespace, key, old, new):
     else:
         new = encoding.tolocal(new) # normal path
 
+    if util.safehasattr(proto, 'restore'):
+
+        proto.redirect()
+
+        try:
+            r = repo.pushkey(encoding.tolocal(namespace), encoding.tolocal(key),
+                             encoding.tolocal(old), new) or False
+        except util.Abort:
+            r = False
+
+        output = proto.restore()
+
+        return '%s\n%s' % (int(r), output)
+
     r = repo.pushkey(encoding.tolocal(namespace), encoding.tolocal(key),
                      encoding.tolocal(old), new)
     return '%s\n' % int(r)
@@ -516,7 +529,7 @@ def stream(repo, proto):
     it is serving. Client checks to see if it understands the format.
 
     The format is simple: the server writes out a line with the amount
-    of files, then the total amount of bytes to be transfered (separated
+    of files, then the total amount of bytes to be transferred (separated
     by a space). Then, for each file, the server first writes the filename
     and filesize (separated by the null character), then the file contents.
     '''
@@ -532,8 +545,9 @@ def stream(repo, proto):
         try:
             repo.ui.debug('scanning\n')
             for name, ename, size in repo.store.walk():
-                entries.append((name, size))
-                total_bytes += size
+                if size:
+                    entries.append((name, size))
+                    total_bytes += size
         finally:
             lock.release()
     except error.LockError:
@@ -545,12 +559,33 @@ def stream(repo, proto):
         repo.ui.debug('%d files, %d bytes to transfer\n' %
                       (len(entries), total_bytes))
         yield '%d %d\n' % (len(entries), total_bytes)
-        for name, size in entries:
-            repo.ui.debug('sending %s (%d bytes)\n' % (name, size))
-            # partially encode name over the wire for backwards compat
-            yield '%s\0%d\n' % (store.encodedir(name), size)
-            for chunk in util.filechunkiter(repo.sopener(name), limit=size):
-                yield chunk
+
+        sopener = repo.sopener
+        oldaudit = sopener.mustaudit
+        debugflag = repo.ui.debugflag
+        sopener.mustaudit = False
+
+        try:
+            for name, size in entries:
+                if debugflag:
+                    repo.ui.debug('sending %s (%d bytes)\n' % (name, size))
+                # partially encode name over the wire for backwards compat
+                yield '%s\0%d\n' % (store.encodedir(name), size)
+                if size <= 65536:
+                    fp = sopener(name)
+                    try:
+                        data = fp.read(size)
+                    finally:
+                        fp.close()
+                    yield data
+                else:
+                    for chunk in util.filechunkiter(sopener(name), limit=size):
+                        yield chunk
+        # replace with "finally:" when support for python 2.4 has been dropped
+        except Exception:
+            sopener.mustaudit = oldaudit
+            raise
+        sopener.mustaudit = oldaudit
 
     return streamres(streamer(repo, entries, total_bytes))
 
@@ -558,7 +593,7 @@ def unbundle(repo, proto, heads):
     their_heads = decodelist(heads)
 
     def check_heads():
-        heads = discovery.visibleheads(repo)
+        heads = repo.heads()
         heads_hash = util.sha1(''.join(sorted(heads))).digest()
         return (their_heads == ['force'] or their_heads == heads or
                 their_heads == ['hashed', heads_hash])
@@ -567,7 +602,8 @@ def unbundle(repo, proto, heads):
 
     # fail early if possible
     if not check_heads():
-        return pusherr('unsynced changes')
+        return pusherr('repository changed while preparing changes - '
+                       'please try again')
 
     # write bundle data to temporary file because it can be big
     fd, tempname = tempfile.mkstemp(prefix='hg-unbundle-')
@@ -580,7 +616,8 @@ def unbundle(repo, proto, heads):
             if not check_heads():
                 # someone else committed/pushed/unbundled while we
                 # were transferring data
-                return pusherr('unsynced changes')
+                return pusherr('repository changed while uploading changes - '
+                               'please try again')
 
             # push can proceed
             fp.seek(0)

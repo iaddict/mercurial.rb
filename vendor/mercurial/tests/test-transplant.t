@@ -1,4 +1,4 @@
-  $ "$TESTDIR/hghave" serve || exit 80
+  $ "$TESTDIR/hghave" killdaemons || exit 80
 
   $ cat <<EOF >> $HGRCPATH
   > [extensions]
@@ -287,6 +287,15 @@ remote transplant with pull
   2  b3
   1  b1
   0  r1
+
+remote transplant without pull
+
+  $ hg pull -q http://localhost:$HGPORT/
+  $ hg transplant -s http://localhost:$HGPORT/ 2 4
+  searching for changes
+  skipping already applied revision 2:8d9279348abb
+  applying 722f4667af76
+  722f4667af76 transplanted to 76e321915884
 
 transplant --continue
 
@@ -631,4 +640,8 @@ test transplanting a patch turning into a no-op
   applying 7a7d57e15850
   skipping emptied changeset 7a7d57e15850
   $ cd ..
+
+Explicitly kill daemons to let the test exit on Windows
+
+  $ "$TESTDIR/killdaemons.py" $DAEMON_PIDS
 

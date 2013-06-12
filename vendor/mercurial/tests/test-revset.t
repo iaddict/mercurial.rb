@@ -78,9 +78,6 @@
   $ hg branch all
   marked working directory as branch all
   (branches are permanent and global, did you want a bookmark?)
-  $ hg ci --close-branch -Aqm8
-  abort: can only close branch heads
-  [255]
 
   $ hg co 4
   0 files updated, 0 files merged, 0 files removed, 0 files unresolved
@@ -218,17 +215,29 @@ quoting needed
   $ log 'date(2005) and 1::'
   4
 
+ancestor can accept 0 or more arguments
+
+  $ log 'ancestor()'
   $ log 'ancestor(1)'
-  hg: parse error: ancestor requires two arguments
-  [255]
+  1
   $ log 'ancestor(4,5)'
   1
   $ log 'ancestor(4,5) and 4'
+  $ log 'ancestor(0,0,1,3)'
+  0
+  $ log 'ancestor(3,1,5,3,5,1)'
+  1
+  $ log 'ancestor(0,1,3,5)'
+  0
+  $ log 'ancestor(1,2,3,4,5)'
+  1
   $ log 'ancestors(5)'
   0
   1
   3
   5
+  $ log 'ancestor(ancestors(5))'
+  0
   $ log 'author(bob)'
   2
   $ log 'author("re:bob|test")'
@@ -332,6 +341,9 @@ quoting needed
   0
   $ log 'merge()'
   6
+  $ log 'branchpoint()'
+  1
+  4
   $ log 'modifies(b)'
   4
   $ log 'modifies("path:b")'
@@ -362,6 +374,13 @@ quoting needed
   $ log 'parents(merge())'
   4
   5
+  $ log 'p1(branchpoint())'
+  0
+  2
+  $ log 'p2(branchpoint())'
+  $ log 'parents(branchpoint())'
+  0
+  2
   $ log 'removes(a)'
   2
   6
@@ -415,8 +434,6 @@ we can use patterns when searching for tags
   $ log 'tag("literal:1.0")'
   6
   $ log 'tag("re:0..*")'
-  abort: no tags exist that match '0..*'
-  [255]
 
   $ log 'tag(unknown)'
   abort: tag 'unknown' does not exist
@@ -739,6 +756,45 @@ issue2549 - correct optimizations
   $ log 'max(1 or 2) and not 2'
   $ log 'min(1 or 2) and not 1'
   $ log 'last(1 or 2, 1) and not 2'
+
+test revsets started with 40-chars hash (issue3669)
+
+  $ ISSUE3669_TIP=`hg tip --template '{node}'`
+  $ hg log -r "${ISSUE3669_TIP}" --template '{rev}\n'
+  9
+  $ hg log -r "${ISSUE3669_TIP}^" --template '{rev}\n'
+  8
+
+test or-ed indirect predicates (issue3775)
+
+  $ log '6 or 6^1' | sort
+  5
+  6
+  $ log '6^1 or 6' | sort
+  5
+  6
+  $ log '4 or 4~1' | sort
+  2
+  4
+  $ log '4~1 or 4' | sort
+  2
+  4
+  $ log '(0 or 2):(4 or 6) or 0 or 6' | sort
+  0
+  1
+  2
+  3
+  4
+  5
+  6
+  $ log '0 or 6 or (0 or 2):(4 or 6)' | sort
+  0
+  1
+  2
+  3
+  4
+  5
+  6
 
 tests for 'remote()' predicate:
 #.  (csets in remote) (id)            (remote)

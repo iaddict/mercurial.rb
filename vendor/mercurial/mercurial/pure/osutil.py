@@ -68,7 +68,7 @@ else:
 
     _INVALID_HANDLE_VALUE = _HANDLE(-1).value
 
-    # CreateFile 
+    # CreateFile
     _FILE_SHARE_READ = 0x00000001
     _FILE_SHARE_WRITE = 0x00000002
     _FILE_SHARE_DELETE = 0x00000004
@@ -82,7 +82,7 @@ else:
 
     _FILE_ATTRIBUTE_NORMAL = 0x80
 
-    # _open_osfhandle
+    # open_osfhandle flags
     _O_RDONLY = 0x0000
     _O_RDWR = 0x0002
     _O_APPEND = 0x0008

@@ -73,7 +73,7 @@ Rebase part of branch2 (5-6) onto branch3 (8):
   $ hg clone -q -u . a a1
   $ cd a1
 
-  $ hg tglog  
+  $ hg tglog
   @  8: 'F' branch3
   |
   o  7: 'branch3' branch3
@@ -120,7 +120,7 @@ Rebase part of branch2 (5-6) onto branch3 (8):
   2: 'B' branch1
   0: 'A' 
 
-  $ hg tglog  
+  $ hg tglog
   @  8: 'E' branch3
   |
   o  7: 'D' branch3
@@ -244,7 +244,7 @@ Rebase entire branch3 (7-8) onto branch2 (6):
   2: 'B' branch1
   0: 'A' 
 
-  $ hg tglog   
+  $ hg tglog
   @  7: 'F' branch2
   |
   o  6: 'E' branch2
@@ -385,3 +385,112 @@ Try both orders.
 
   $ hg theads
   0: 'A' 
+
+Make sure rebase does not break for phase/filter related reason
+----------------------------------------------------------------
+(issue3858)
+
+  $ cd ..
+
+  $ cat >> $HGRCPATH << EOF
+  > [ui]
+  > logtemplate={rev} {desc} {phase}\n
+  > EOF
+  $ cat $HGRCPATH
+  [ui]
+  slash = True
+  interactive = False
+  [defaults]
+  backout = -d "0 0"
+  commit = -d "0 0"
+  tag = -d "0 0"
+  [extensions]
+  graphlog=
+  rebase=
+  mq=
+  
+  [phases]
+  publish=False
+  
+  [alias]
+  tglog  = log -G --template "{rev}: '{desc}' {branches}\n"
+  theads = heads --template "{rev}: '{desc}' {branches}\n"
+  [ui]
+  logtemplate={rev} {desc} {phase}\n
+
+
+  $ hg init c4
+  $ cd c4
+
+  $ echo a > a
+  $ hg ci -Am A
+  adding a
+  $ echo b > b
+  $ hg ci -Am B
+  adding b
+  $ hg up 0
+  0 files updated, 0 files merged, 1 files removed, 0 files unresolved
+  $ echo c > c
+  $ hg ci -Am C
+  adding c
+  created new head
+  $ hg up 1
+  1 files updated, 0 files merged, 1 files removed, 0 files unresolved
+  $ hg merge
+  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  (branch merge, don't forget to commit)
+  $ hg ci -m d
+  $ hg up 2
+  0 files updated, 0 files merged, 1 files removed, 0 files unresolved
+  $ echo e > e
+  $ hg ci -Am E
+  adding e
+  created new head
+  $ hg merge 3
+  1 files updated, 0 files merged, 0 files removed, 0 files unresolved
+  (branch merge, don't forget to commit)
+  $ hg ci -m F
+  $ hg up 3
+  0 files updated, 0 files merged, 1 files removed, 0 files unresolved
+  $ echo g > g
+  $ hg ci -Am G
+  adding g
+  created new head
+  $ echo h > h
+  $ hg ci -Am H
+  adding h
+  $ hg up 5
+  1 files updated, 0 files merged, 2 files removed, 0 files unresolved
+  $ echo i > i
+  $ hg ci -Am I
+  adding i
+
+Turn most changeset public
+
+  $ hg ph -p 7
+
+  $ hg heads
+  8 I draft
+  7 H public
+  $ hg log -G
+  @  8 I draft
+  |
+  | o  7 H public
+  | |
+  | o  6 G public
+  | |
+  o |  5 F draft
+  |\|
+  o |  4 E draft
+  | |
+  | o  3 d public
+  |/|
+  o |  2 C public
+  | |
+  | o  1 B public
+  |/
+  o  0 A public
+  
+
+  $ hg rebase --dest 7 --source 5
+  saved backup bundle to $TESTTMP/a3/c4/.hg/strip-backup/*-backup.hg (glob)

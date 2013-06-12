@@ -80,8 +80,8 @@ def tolocal(s):
     'foo: \\xc3\\xa4'
     >>> u2 = 'foo: \\xc3\\xa1'
     >>> d = { l: 1, tolocal(u2): 2 }
-    >>> d # no collision
-    {'foo: ?': 1, 'foo: ?': 2}
+    >>> len(d) # no collision
+    2
     >>> 'foo: ?' in d
     False
     >>> l1 = 'foo: \\xe4' # historical latin1 fallback
@@ -223,7 +223,7 @@ def toutf8b(s):
 
     Principles of operation:
 
-    - ASCII and UTF-8 data sucessfully round-trips and is understood
+    - ASCII and UTF-8 data successfully round-trips and is understood
       by Unicode-oriented clients
     - filenames and file contents in arbitrary other encodings can have
       be round-tripped or recovered by clueful clients

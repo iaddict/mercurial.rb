@@ -8,11 +8,11 @@
 
 '''High-level command function for lfconvert, plus the cmdtable.'''
 
-import os
+import os, errno
 import shutil
 
 from mercurial import util, match as match_, hg, node, context, error, \
-    cmdutil, scmutil
+    cmdutil, scmutil, commands
 from mercurial.i18n import _
 from mercurial.lock import release
 
@@ -65,7 +65,7 @@ def lfconvert(ui, src, dest, *pats, **opts):
         dstlock = rdst.lock()
 
         # Get a list of all changesets in the source.  The easy way to do this
-        # is to simply walk the changelog, using changelog.nodesbewteen().
+        # is to simply walk the changelog, using changelog.nodesbetween().
         # Take a look at mercurial/revlog.py:639 for more details.
         # Use a generator instead of a list to decrease memory usage
         ctxs = (rsrc[ctx] for ctx in rsrc.changelog.nodesbetween(None,
@@ -141,7 +141,17 @@ def _addchangeset(ui, rsrc, rdst, ctx, revmap):
 
             hash = fctx.data().strip()
             path = lfutil.findfile(rsrc, hash)
-            ### TODO: What if the file is not cached?
+
+            # If one file is missing, likely all files from this rev are
+            if path is None:
+                cachelfiles(ui, rsrc, ctx.node())
+                path = lfutil.findfile(rsrc, hash)
+
+                if path is None:
+                    raise util.Abort(
+                        _("missing largefile \'%s\' from revision %s")
+                         % (f, node.hex(ctx.node())))
+
             data = ''
             fd = None
             try:
@@ -177,7 +187,7 @@ def _lfconvert_addchangeset(rsrc, rdst, ctx, revmap, lfiles, normalfiles,
         if f not in lfiles and f not in normalfiles:
             islfile = _islfile(f, ctx, matcher, size)
             # If this file was renamed or copied then copy
-            # the lfileness of its predecessor
+            # the largefile-ness of its predecessor
             if f in ctx.manifest():
                 fctx = ctx.filectx(f)
                 renamed = fctx.renamed()
@@ -205,20 +215,12 @@ def _lfconvert_addchangeset(rsrc, rdst, ctx, revmap, lfiles, normalfiles,
                         raise util.Abort(_('largefile %s becomes symlink') % f)
 
                 # largefile was modified, update standins
-                fullpath = rdst.wjoin(f)
-                util.makedirs(os.path.dirname(fullpath))
                 m = util.sha1('')
                 m.update(ctx[f].data())
                 hash = m.hexdigest()
                 if f not in lfiletohash or lfiletohash[f] != hash:
-                    try:
-                        fd = open(fullpath, 'wb')
-                        fd.write(ctx[f].data())
-                    finally:
-                        if fd:
-                            fd.close()
+                    rdst.wwrite(f, ctx[f].data(), ctx[f].flags())
                     executable = 'x' in ctx[f].flags()
-                    os.chmod(fullpath, lfutil.getmode(executable))
                     lfutil.writestandin(rdst, lfutil.standin(f), hash,
                         executable)
                     lfiletohash[f] = hash
@@ -358,9 +360,9 @@ def uploadlfiles(ui, rsrc, rdst, files):
     ui.progress(_('uploading largefiles'), None)
 
 def verifylfiles(ui, repo, all=False, contents=False):
-    '''Verify that every big file revision in the current changeset
+    '''Verify that every largefile revision in the current changeset
     exists in the central store.  With --contents, also verify that
-    the contents of each big file revision are correct (SHA-1 hash
+    the contents of each local largefile file revision are correct (SHA-1 hash
     matches the revision ID).  With --all, check every changeset in
     this repository.'''
     if all:
@@ -372,6 +374,13 @@ def verifylfiles(ui, repo, all=False, contents=False):
 
     store = basestore._openstore(repo)
     return store.verify(revs, contents=contents)
+
+def debugdirstate(ui, repo):
+    '''Show basic information for the largefiles dirstate'''
+    lfdirstate = lfutil.openlfdirstate(ui, repo)
+    for file_, ent in sorted(lfdirstate._map.iteritems()):
+        mode = '%3o' % (ent[1] & 0777 & ~util.umask)
+        ui.write("%c %s %10d %s\n" % (ent[0], mode, ent[2], file_))
 
 def cachelfiles(ui, repo, node, filelist=None):
     '''cachelfiles ensures that all largefiles needed by the specified revision
@@ -386,22 +395,13 @@ def cachelfiles(ui, repo, node, filelist=None):
     toget = []
 
     for lfile in lfiles:
-        # If we are mid-merge, then we have to trust the standin that is in the
-        # working copy to have the correct hashvalue.  This is because the
-        # original hg.merge() already updated the standin as part of the normal
-        # merge process -- we just have to udpate the largefile to match.
-        if (getattr(repo, "_ismerging", False) and
-             os.path.exists(repo.wjoin(lfutil.standin(lfile)))):
-            expectedhash = lfutil.readstandin(repo, lfile)
-        else:
+        try:
             expectedhash = repo[node][lfutil.standin(lfile)].data().strip()
-
-        # if it exists and its hash matches, it might have been locally
-        # modified before updating and the user chose 'local'.  in this case,
-        # it will not be in any store, so don't look for it.
-        if ((not os.path.exists(repo.wjoin(lfile)) or
-             expectedhash != lfutil.hashfile(repo.wjoin(lfile))) and
-            not lfutil.findfile(repo, expectedhash)):
+        except IOError, err:
+            if err.errno == errno.ENOENT:
+                continue # node must be None and standin wasn't found in wctx
+            raise
+        if not lfutil.findfile(repo, expectedhash):
             toget.append((lfile, expectedhash))
 
     if toget:
@@ -418,11 +418,12 @@ def downloadlfiles(ui, repo, rev=None):
         pass
     totalsuccess = 0
     totalmissing = 0
-    for ctx in cmdutil.walkchangerevs(repo, matchfn, {'rev' : rev},
-                                      prepare):
-        success, missing = cachelfiles(ui, repo, ctx.node())
-        totalsuccess += len(success)
-        totalmissing += len(missing)
+    if rev != []: # walkchangerevs on empty list would return all revs
+        for ctx in cmdutil.walkchangerevs(repo, matchfn, {'rev' : rev},
+                                          prepare):
+            success, missing = cachelfiles(ui, repo, ctx.node())
+            totalsuccess += len(success)
+            totalmissing += len(missing)
     ui.status(_("%d additional largefiles cached\n") % totalsuccess)
     if totalmissing > 0:
         ui.status(_("%d largefiles failed to download\n") % totalmissing)
@@ -441,14 +442,16 @@ def updatelfiles(ui, repo, filelist=None, printmessage=True):
         if printmessage and lfiles:
             ui.status(_('getting changed largefiles\n'))
             printed = True
-            cachelfiles(ui, repo, '.', lfiles)
+            cachelfiles(ui, repo, None, lfiles)
 
         updated, removed = 0, 0
-        for i in map(lambda f: _updatelfile(repo, lfdirstate, f), lfiles):
-            # increment the appropriate counter according to _updatelfile's
-            # return value
-            updated += i > 0 and i or 0
-            removed -= i < 0 and i or 0
+        for f in lfiles:
+            i = _updatelfile(repo, lfdirstate, f)
+            if i:
+                if i > 0:
+                    updated += i
+                else:
+                    removed -= i
             if printmessage and (removed or updated) and not printed:
                 ui.status(_('getting changed largefiles\n'))
                 printed = True
@@ -471,8 +474,8 @@ def _updatelfile(repo, lfdirstate, lfile):
     abslfile = repo.wjoin(lfile)
     absstandin = repo.wjoin(lfutil.standin(lfile))
     if os.path.exists(absstandin):
-        if os.path.exists(absstandin+'.orig'):
-            shutil.copyfile(abslfile, abslfile+'.orig')
+        if os.path.exists(absstandin + '.orig') and os.path.exists(abslfile):
+            shutil.copyfile(abslfile, abslfile + '.orig')
         expecthash = lfutil.readstandin(repo, lfile)
         if (expecthash != '' and
             (not os.path.exists(abslfile) or
@@ -481,6 +484,8 @@ def _updatelfile(repo, lfdirstate, lfile):
                 # use normallookup() to allocate entry in largefiles dirstate,
                 # because lack of it misleads lfilesrepo.status() into
                 # recognition that such cache missing files are REMOVED.
+                if lfile not in repo[None]: # not switched to normal file
+                    util.unlinkpath(abslfile, ignoremissing=True)
                 lfdirstate.normallookup(lfile)
                 return None # don't try to set the mode
             else:
@@ -497,7 +502,8 @@ def _updatelfile(repo, lfdirstate, lfile):
         # lfile is added to the repository again. This happens when a
         # largefile is converted back to a normal file: the standin
         # disappears, but a new (normal) file appears as the lfile.
-        if os.path.exists(abslfile) and lfile not in repo[None]:
+        if (os.path.exists(abslfile) and
+            repo.dirstate.normalize(lfile) not in repo[None]):
             util.unlinkpath(abslfile)
             ret = -1
     state = repo.dirstate[lfutil.standin(lfile)]
@@ -517,22 +523,40 @@ def _updatelfile(repo, lfdirstate, lfile):
         lfdirstate.drop(lfile)
     return ret
 
-def catlfile(repo, lfile, rev, filename):
-    hash = lfutil.readstandin(repo, lfile, rev)
-    if not lfutil.inusercache(repo.ui, hash):
-        store = basestore._openstore(repo)
-        success, missing = store.get([(lfile, hash)])
-        if len(success) != 1:
-            raise util.Abort(
-                _('largefile %s is not in cache and could not be downloaded')
-                    % lfile)
-    path = lfutil.usercachepath(repo.ui, hash)
-    fpout = cmdutil.makefileobj(repo, filename)
-    fpin = open(path, "rb")
-    fpout.write(fpin.read())
-    fpout.close()
-    fpin.close()
-    return 0
+def lfpull(ui, repo, source="default", **opts):
+    """pull largefiles for the specified revisions from the specified source
+
+    Pull largefiles that are referenced from local changesets but missing
+    locally, pulling from a remote repository to the local cache.
+
+    If SOURCE is omitted, the 'default' path will be used.
+    See :hg:`help urls` for more information.
+
+    .. container:: verbose
+
+      Some examples:
+
+      - pull largefiles for all branch heads::
+
+          hg lfpull -r "head() and not closed()"
+
+      - pull largefiles on the default branch::
+
+          hg lfpull -r "branch(default)"
+    """
+    repo.lfpullsource = source
+
+    revs = opts.get('rev', [])
+    if not revs:
+        raise util.Abort(_('no revisions specified'))
+    revs = scmutil.revrange(repo, revs)
+
+    numcached = 0
+    for rev in revs:
+        ui.note(_('pulling largefiles for revision %s\n') % rev)
+        (cached, missing) = cachelfiles(ui, repo, rev)
+        numcached += len(cached)
+    ui.status(_("%d largefiles cached\n") % numcached)
 
 # -- hg commands declarations ------------------------------------------------
 
@@ -546,4 +570,11 @@ cmdtable = {
                    _('convert from a largefiles repo to a normal repo')),
                   ],
                   _('hg lfconvert SOURCE DEST [FILE ...]')),
+    'lfpull': (lfpull,
+               [('r', 'rev', [], _('pull largefiles for these revisions'))
+                ] +  commands.remoteopts,
+               _('-r REV... [-e CMD] [--remotecmd CMD] [SOURCE]')
+               ),
     }
+
+commands.inferrepo += " lfconvert"
