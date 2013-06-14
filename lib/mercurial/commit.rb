@@ -1,3 +1,5 @@
+require 'date'
+
 module Mercurial
   class Commit
     attr_reader :repository

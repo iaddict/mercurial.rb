@@ -108,7 +108,7 @@ class HgRun(object):
         sys.stdout.flush()
 
     def _parse_header(self, header):
-        return header.get("args", [])
+        return [arg.encode('utf-8') for arg in header.get("args", [])]
 
     def start(self):
         """
