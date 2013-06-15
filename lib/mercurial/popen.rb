@@ -67,10 +67,10 @@ module Mercurial
     end
     
     def run_command(args)
-      args = args.reject &:empty?
+      args = args.reject(&:empty?)
       ret_values = hg_run(args)
-      fout = Base64.decode64 ret_values['fout']
-      ferr = Base64.decode64 ret_values['ferr']
+      fout = Base64.decode64(ret_values['fout']).force_encoding('UTF-8')
+      ferr = Base64.decode64(ret_values['ferr']).force_encoding('UTF-8')
       
       if ferr.empty?
         [true, fout]
